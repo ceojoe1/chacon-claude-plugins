@@ -4,8 +4,7 @@
     "name": "Joe Chacon"
   },
   "metadata": {
-    "description": "Personal Claude Code plugin marketplace",
-    "pluginRoot": "./plugins"
+    "description": "Personal Claude Code plugin marketplace"
   },
   "plugins": [
     {
