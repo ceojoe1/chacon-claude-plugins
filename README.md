@@ -66,12 +66,72 @@ playwright/                 # shared Playwright runtime
   settings.json
 ```
 
+## Installation
+
+### 1. Clone the marketplace into your project
+
+From the root of your Claude Code project:
+
+```bash
+git clone https://github.com/ceojoe1/chacon-claude-plugins .chacon-marketplace-src
+```
+
+Or add it as a submodule so it stays in sync:
+
+```bash
+git submodule add https://github.com/ceojoe1/chacon-claude-plugins .chacon-marketplace-src
+```
+
+### 2. Install a plugin
+
+Copy the plugin files into your project. For `chacon-travel`:
+
+```bash
+# Playwright runtime
+cp -r .chacon-marketplace-src/playwright ./playwright
+
+# Plugin bundle
+cp -r .chacon-marketplace-src/plugins ./plugins
+
+# Marketplace registry (optional — tracks what's installed)
+cp -r .chacon-marketplace-src/.chacon-marketplace ./.chacon-marketplace
+```
+
+### 3. Install skills into Claude Code
+
+Claude Code reads skills from `.claude/skills/` in your project. Copy the skill definitions for each command you want:
+
+```bash
+# All four chacon-travel skills
+cp -r .chacon-marketplace-src/.claude/skills/flights      .claude/skills/flights
+cp -r .chacon-marketplace-src/.claude/skills/hotels       .claude/skills/hotels
+cp -r .chacon-marketplace-src/.claude/skills/vacation-packages .claude/skills/vacation-packages
+cp -r .chacon-marketplace-src/.claude/skills/search-all   .claude/skills/search-all
+```
+
+Or install only the skills you need (e.g. just `/flights` and `/hotels`).
+
+### 4. Install Playwright dependencies
+
+```bash
+cd playwright && npm install
+```
+
+### 5. Verify
+
+Open a Claude Code session in your project. The installed commands should appear as available skills:
+
+```
+/flights
+/hotels
+/vacation-packages
+/search-all
+```
+
+---
+
 ## Requirements
 
 - [Claude Code](https://claude.ai/code)
 - [Claude-in-Chrome](https://chromewebstore.google.com/detail/claude-in-chrome) extension
 - Node.js 18+
-
-```bash
-cd playwright && npm install
-```
