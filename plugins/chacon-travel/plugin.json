@@ -1,0 +1,36 @@
+{
+  "name": "chacon-travel",
+  "version": "1.0.0",
+  "description": "Browser-automated travel search for flights, hotels, and vacation packages. Runs headless Playwright searches with Chrome MCP fallback across Google Flights, Southwest, Expedia, Kayak, Costco Travel, VRBO, Airbnb, and Southwest Vacations.",
+  "author": "Joe Chacon",
+  "skills": [
+    {
+      "command": "/flights",
+      "name": "flights",
+      "description": "Search Google Flights, Southwest, Expedia, and Kayak for round-trip flight prices",
+      "skill": "skills/flights/SKILL.md"
+    },
+    {
+      "command": "/hotels",
+      "name": "hotels",
+      "description": "Search Google Hotels, Expedia, Kayak, Costco Travel, VRBO, and Airbnb for hotel and vacation rental prices",
+      "skill": "skills/hotels/SKILL.md"
+    },
+    {
+      "command": "/vacation-packages",
+      "name": "vacation-packages",
+      "description": "Search Southwest Vacations, Costco Travel, Expedia, and Kayak for bundled flight + hotel packages",
+      "skill": "skills/vacation-packages/SKILL.md"
+    },
+    {
+      "command": "/search-all",
+      "name": "search-all",
+      "description": "Run all travel searches in parallel as sub-agents and aggregate into a unified trip cost summary",
+      "skill": "skills/search-all/SKILL.md"
+    }
+  ],
+  "playwright": {
+    "sitesDir": "playwright/",
+    "sharedLib": "../../playwright/lib/"
+  }
+}
