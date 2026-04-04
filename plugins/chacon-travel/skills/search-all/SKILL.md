@@ -21,7 +21,7 @@ Then collect all remaining details via a **single** AskUserQuestion call:
 - Destination city — skip if pre-filled
 - Departure date (YYYY-MM-DD)
 - Return date (YYYY-MM-DD)
-- Number of travelers
+- Number of travelers (exact whole number, e.g. 2, 3, 4)
 - Number of rooms (for hotels, default 1)
 
 **Experiences** — ask which experiences they plan to attend using multiSelect: true. Offer destination-appropriate options (e.g. for Orlando: Theme Parks, Disney World, Universal Studios, International Drive, Beaches). Always include "Other / No preference".

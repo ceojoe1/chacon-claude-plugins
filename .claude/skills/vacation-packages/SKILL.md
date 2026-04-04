@@ -21,7 +21,7 @@ Then collect any remaining missing details via AskUserQuestion:
 - Departure city (origin for flights)
 - Check-in date (YYYY-MM-DD)
 - Check-out date (YYYY-MM-DD)
-- Number of travelers
+- Number of travelers (exact whole number, e.g. 2, 3, 4)
 
 **Experiences** — ask the user which experiences they plan to attend, using multiSelect: true. Offer 3–4 destination-appropriate options based on the destination (e.g., for Orlando: Theme Parks, Disney World, Universal Studios, International Drive, Beaches). Always include an "Other / No preference" option. The user may select multiple.
 

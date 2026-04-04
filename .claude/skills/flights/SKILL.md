@@ -21,7 +21,7 @@ Then collect any remaining missing details via AskUserQuestion:
 - Destination city — skip if pre-filled from an existing folder
 - Departure date (YYYY-MM-DD)
 - Return date (YYYY-MM-DD)
-- Number of travelers
+- Number of travelers (exact whole number, e.g. 2, 3, 4)
 
 ## Step 2 — Search for Flights
 
