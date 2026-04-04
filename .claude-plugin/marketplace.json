@@ -1,0 +1,21 @@
+{
+  "name": "chacon-marketplace",
+  "owner": {
+    "name": "Joe Chacon"
+  },
+  "metadata": {
+    "description": "Personal Claude Code plugin marketplace",
+    "pluginRoot": "./plugins"
+  },
+  "plugins": [
+    {
+      "name": "chacon-travel",
+      "source": "./plugins/chacon-travel",
+      "description": "Browser-automated travel search — flights, hotels, and vacation packages",
+      "version": "1.0.0",
+      "author": {
+        "name": "Joe Chacon"
+      }
+    }
+  ]
+}
