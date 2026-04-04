@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "if [ -d ./playwright ] && [ ! -d ./playwright/node_modules ]; then echo '[chacon-travel] Installing Playwright dependencies...' && cd ./playwright && npm install --silent && echo '[chacon-travel] Playwright dependencies installed.'; fi"
+          }
+        ]
+      }
+    ]
+  }
+}

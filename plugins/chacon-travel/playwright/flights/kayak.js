@@ -1,4 +1,4 @@
-import { humanDelay, detectCaptcha, waitForCaptchaSolve } from '../../../../playwright/sites/helpers.js';
+import { humanDelay, detectCaptcha, waitForCaptchaSolve } from '../sites/helpers.js';
 
 const SITE = 'Kayak';
 

@@ -1,4 +1,4 @@
-import { humanDelay, detectCaptcha, waitForCaptchaSolve, parsePrice } from '../../../../playwright/sites/helpers.js';
+import { humanDelay, detectCaptcha, waitForCaptchaSolve, parsePrice } from '../sites/helpers.js';
 
 const SITE = 'Expedia';
 

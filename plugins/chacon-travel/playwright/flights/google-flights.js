@@ -1,4 +1,4 @@
-import { humanDelay, detectCaptcha, selectAutocomplete } from '../../../../playwright/sites/helpers.js';
+import { humanDelay, detectCaptcha, selectAutocomplete } from '../sites/helpers.js';
 
 const SITE = 'Google Flights';
 const URL = 'https://www.google.com/travel/flights';

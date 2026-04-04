@@ -1,4 +1,4 @@
-import { humanDelay, detectCaptcha, selectAutocomplete } from '../../../../playwright/sites/helpers.js';
+import { humanDelay, detectCaptcha, selectAutocomplete } from '../sites/helpers.js';
 
 const SITE = 'Southwest Vacations';
 const URL = 'https://www.southwest.com/vacations/';

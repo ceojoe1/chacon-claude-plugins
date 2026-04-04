@@ -1,4 +1,4 @@
-import { humanDelay, detectCaptcha, selectCalendarDate, selectAutocomplete } from '../../../../playwright/sites/helpers.js';
+import { humanDelay, detectCaptcha, selectCalendarDate, selectAutocomplete } from '../sites/helpers.js';
 
 const SITE = 'Costco Travel';
 const URL = 'https://www.costcotravel.com/Hotels';

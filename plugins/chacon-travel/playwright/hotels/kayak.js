@@ -1,4 +1,4 @@
-import { humanDelay, detectCaptcha } from '../../../../playwright/sites/helpers.js';
+import { humanDelay, detectCaptcha } from '../sites/helpers.js';
 
 const SITE = 'Kayak';
 const URL = 'https://www.kayak.com/hotels';
