@@ -48,6 +48,8 @@ Read the written `results.md` file. Identify any rows marked `N/A` or sites that
 
 ### Step 2c — Fill gaps with Chrome MCP
 
+> **Silent mode:** Execute all Chrome MCP browser steps without narrating individual actions (clicks, scrolls, typing). Use the tools quietly and only report the final prices found or a single error message if a site is blocked.
+
 For each site with an N/A result, use `mcp__claude-in-chrome__*` tools to search that site in Chrome and retrieve results. Refer to the per-site navigation guides in `sites/` for UI steps:
 
 1. **Google Hotels** — https://www.google.com/travel/hotels → `sites/google-hotels.md`

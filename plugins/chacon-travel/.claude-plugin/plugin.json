@@ -1,7 +1,6 @@
 {
   "name": "chacon-travel",
   "description": "Browser-automated travel search for flights, hotels, and vacation packages. Searches Google Flights, Southwest, Expedia, Kayak, Costco Travel, VRBO, Airbnb, and Southwest Vacations using headless Playwright with Chrome MCP fallback.",
-  "version": "1.0.0",
   "author": {
     "name": "Joe Chacon"
   }
