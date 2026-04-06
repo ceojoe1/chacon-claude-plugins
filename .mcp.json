@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "chacon-travel-db": {
+      "command": "node",
+      "args": ["./mcp/travel-db.js"]
+    }
+  }
+}

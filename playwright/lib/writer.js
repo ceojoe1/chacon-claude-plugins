@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { saveSearch } from './db.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TRAVEL_PLANS_DIR = path.resolve(__dirname, '../../travel_plans');
@@ -121,6 +122,13 @@ ${tableContent}
     fs.appendFileSync(outPath, '\n---\n\n' + content, 'utf8');
   } else {
     fs.writeFileSync(outPath, content, 'utf8');
+  }
+
+  // Persist to SQLite alongside markdown (non-fatal — markdown is source of truth)
+  try {
+    saveSearch({ params, results });
+  } catch (err) {
+    console.warn(`  [db] Write skipped: ${err.message}`);
   }
 
   return outPath;

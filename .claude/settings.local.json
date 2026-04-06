@@ -1,0 +1,11 @@
+{
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "chacon-travel-db"
+  ],
+  "permissions": {
+    "allow": [
+      "mcp__chacon-travel-db__get_trips"
+    ]
+  }
+}
