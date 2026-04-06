@@ -1,11 +1,26 @@
 ---
-name: setup
+name: travel-setup
 description: First-time setup for chacon-travel. Copies the Playwright runtime and MCP server into the current project, installs npm dependencies, and registers the travel DB MCP server. Run once after installing the plugin.
 ---
 
 Set up the chacon-travel Playwright runtime and MCP server in the current project.
 
 ## Steps
+
+### Step 0 — Dependency check
+
+0. Verify that `npm` is available:
+   ```bash
+   npm --version
+   ```
+   - If the command succeeds, continue to Step 1.
+   - If it fails (command not found), install Node.js + npm via the platform-appropriate method:
+     - **Windows:** `winget install OpenJS.NodeJS.LTS`
+     - **macOS:** `brew install node`
+     - **Linux:** `curl -fsSL https://deb.nodesource.com/setup_lts.x | sudo -E bash - && sudo apt-get install -y nodejs`
+
+   After installing, verify again with `npm --version`. If it still fails, stop and tell the user:
+   > "Could not install npm automatically. Please install Node.js from https://nodejs.org and re-run /travel-setup."
 
 ### Step 1 — Playwright runtime
 
