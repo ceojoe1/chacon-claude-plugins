@@ -6,7 +6,7 @@ URL: https://www.southwest.com/vacations/
 
 - **Correct URL is `southwest.com/vacations/`** — not `southwestvacations.com` (that site redirects here).
 - Field labels are **"From"** and **"To"** — the "From" field pre-fills based on user location (e.g., ABQ).
-- **Use airport code "MCO"** for Orlando destination — "Orlando" alone triggers no autocomplete; "MCO" immediately shows "Orlando (Orlando Intl.)" as the first option.
+- **Use the destination's IATA airport code** in the "To" field — city names alone often fail autocomplete. Examples: `SAN` for San Diego, `MCO` for Orlando, `LAS` for Las Vegas. The autocomplete immediately shows a matching airport as the first option.
 - **Default travelers is "1 Room, 2 Travelers"** — to add more adults, click the button and use the "+" stepper.
 - Date inputs have `inputmode="none"` — keyboard input is blocked; calendar widget required.
 - Results open in a **new tab** at `vacations.southwest.com/package/fh` — set up the `waitForEvent('page')` listener BEFORE clicking "Find a vacation" to avoid race condition.
@@ -15,7 +15,7 @@ URL: https://www.southwest.com/vacations/
 
 ### Destination Field
 - Selector: `getByRole('combobox', { name: /^To$/i }).first()`
-- Use `fill('MCO')` — triggers autocomplete, first option is "Orlando (Orlando Intl.)"
+- Use `fill('{IATA_CODE}')` where `{IATA_CODE}` is the destination's airport code (e.g. `SAN` for San Diego, `LAS` for Las Vegas, `MCO` for Orlando) — city names alone often fail autocomplete; the airport code immediately shows the correct option
 - Click the first `[role="option"]` or press ArrowDown + Enter if no option visible
 
 ### Date Fields
@@ -64,7 +64,7 @@ URL: https://www.southwest.com/vacations/
 ## Steps (Playwright)
 
 1. Navigate to `https://www.southwest.com/vacations/`
-2. **To field**: `fill('MCO')` → click first `[role="option"]` or ArrowDown+Enter
+2. **To field**: `fill('{IATA_CODE}')` using the destination's airport code → click first `[role="option"]` or ArrowDown+Enter
 3. **Dates**: JS native setter → click input to open calendar → click day cells via page.evaluate() with full MouseEvents
 4. **Travelers**: Click travelers button → click "+" N-2 times → click Apply
 5. Set up `context.waitForEvent('page')` listener BEFORE clicking search
