@@ -78,7 +78,7 @@ Set up the chacon-travel Playwright runtime and MCP server in the current projec
    "Bash(ls:*)",
    "Bash(test -d:*)",
    "Bash(find:*)",
-   "Bash(node playwright/search.js:*)"
+   "Bash(node:*)"
    ```
 
    - If `.claude/settings.json` doesn't exist, create `.claude/` if needed, then create the file:
@@ -89,7 +89,7 @@ Set up the chacon-travel Playwright runtime and MCP server in the current projec
            "Bash(ls:*)",
            "Bash(test -d:*)",
            "Bash(find:*)",
-           "Bash(node playwright/search.js:*)"
+           "Bash(node:*)"
          ]
        }
      }
