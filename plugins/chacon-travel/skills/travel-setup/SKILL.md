@@ -100,12 +100,23 @@ Set up the chacon-travel Playwright runtime and MCP server in the current projec
      - For each of the 4 entries above, add it only if not already present.
      - Write the file back.
 
-### Step 5 — Confirm
+### Step 5 — Install git hooks
 
-5. Tell the user:
+5. Check if `./scripts/install-hooks.sh` exists in the current working directory.
+   - If it does not exist, skip this step.
+   - If it exists, run:
+     ```bash
+     bash ./scripts/install-hooks.sh
+     ```
+     Show the output. This installs `pre-commit` and `prepare-commit-msg` hooks into `.git/hooks/` so plugin version bumping and commit message prefixing happen automatically on every commit.
+
+### Step 6 — Confirm
+
+6. Tell the user:
    > "chacon-travel is ready.
    > - Skills: /flights, /hotels, /vacation-packages, /search-all
    > - MCP: `chacon-travel-db` registered in .mcp.json — **restart Claude Code** to activate the travel DB query tools.
-   > - Permissions: bash allow-list updated in .claude/settings.json — no more prompts for directory checks and search commands."
+   > - Permissions: bash allow-list updated in .claude/settings.json — no more prompts for directory checks and search commands.
+   > - Git hooks: pre-commit (auto version bump) and prepare-commit-msg (version prefix) installed."
 
 If any step fails, show the full error and tell the user what went wrong.

@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Prepend "v{VERSION} — " to commit message when plugin files are staged
+
+COMMIT_MSG_FILE="$1"
+COMMIT_SOURCE="$2"  # "message", "template", "merge", "squash", "commit" (amend)
+
+# Only inject on normal commits — skip amends, merges, squashes
+if [ "$COMMIT_SOURCE" = "commit" ] || [ "$COMMIT_SOURCE" = "merge" ] || [ "$COMMIT_SOURCE" = "squash" ]; then
+  exit 0
+fi
+
+PLUGIN_JSON="plugins/chacon-travel/.claude-plugin/plugin.json"
+
+# Only inject if plugin files are staged
+STAGED=$(git diff --cached --name-only | grep "^plugins/chacon-travel/" | grep -v "plugin\.json" || true)
+if [ -z "$STAGED" ]; then
+  exit 0
+fi
+
+# Read version (pre-commit hook has already bumped it by now)
+VERSION=$(node -e "const f=require('./$PLUGIN_JSON'); console.log(f.version);" 2>/dev/null)
+if [ -z "$VERSION" ]; then
+  exit 0
+fi
+
+PREFIX="v$VERSION — "
+CURRENT_MSG=$(cat "$COMMIT_MSG_FILE")
+
+# Don't double-inject if message already starts with a version tag
+if echo "$CURRENT_MSG" | grep -qE "^v[0-9]+\.[0-9]+\.[0-9]+"; then
+  exit 0
+fi
+
+echo "${PREFIX}${CURRENT_MSG}" > "$COMMIT_MSG_FILE"

@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Auto-bump chacon-travel patch version when plugin files are staged
+
+PLUGIN_DIR="plugins/chacon-travel"
+PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
+MARKETPLACE_JSON=".claude-plugin/marketplace.json"
+
+# Check if any plugin files are staged (excluding the version files themselves)
+STAGED=$(git diff --cached --name-only | grep "^$PLUGIN_DIR/" | grep -v "plugin\.json" || true)
+
+if [ -z "$STAGED" ]; then
+  exit 0
+fi
+
+# Read current version from plugin.json
+CURRENT=$(node -e "const f=require('./$PLUGIN_JSON'); console.log(f.version);")
+if [ -z "$CURRENT" ]; then
+  echo "[chacon-travel] Could not read version from $PLUGIN_JSON — skipping auto-bump"
+  exit 0
+fi
+
+# Bump patch (1.2.1 -> 1.2.2)
+IFS='.' read -r MAJOR MINOR PATCH <<< "$CURRENT"
+PATCH=$((PATCH + 1))
+NEW="$MAJOR.$MINOR.$PATCH"
+
+echo "[chacon-travel] Auto-bumping version $CURRENT → $NEW"
+
+# Update plugin.json
+node -e "
+const fs = require('fs');
+const f = JSON.parse(fs.readFileSync('./$PLUGIN_JSON', 'utf8'));
+f.version = '$NEW';
+fs.writeFileSync('./$PLUGIN_JSON', JSON.stringify(f, null, 2) + '\n');
+"
+
+# Update marketplace.json (plugins[0].version and metadata.version)
+node -e "
+const fs = require('fs');
+const f = JSON.parse(fs.readFileSync('./$MARKETPLACE_JSON', 'utf8'));
+if (f.metadata) f.metadata.version = '$NEW';
+if (f.plugins && f.plugins[0]) f.plugins[0].version = '$NEW';
+fs.writeFileSync('./$MARKETPLACE_JSON', JSON.stringify(f, null, 2) + '\n');
+"
+
+# Stage the version file changes
+git add "$PLUGIN_JSON" "$MARKETPLACE_JSON"
+
+echo "[chacon-travel] Version files staged."
