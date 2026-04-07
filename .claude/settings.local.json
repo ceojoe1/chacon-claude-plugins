@@ -1,11 +1,13 @@
 {
+  "permissions": {
+    "allow": [
+      "mcp__chacon-travel-db__get_trips",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)"
+    ]
+  },
   "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "chacon-travel-db"
-  ],
-  "permissions": {
-    "allow": [
-      "mcp__chacon-travel-db__get_trips"
-    ]
-  }
+  ]
 }
