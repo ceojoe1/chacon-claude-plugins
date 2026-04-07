@@ -9,18 +9,18 @@ When this skill is invoked:
 
 ## Step 1 — Collect Inputs
 
-First, check whether `travel_plans/` exists and contains any destination folders.
+First, call the `mcp__chacon-travel-db__get_trips` tool to retrieve stored trips from the database.
 
-- If **existing destination folders are found**, use AskUserQuestion to ask the user:
-  - "Which destination would you like to search?" with one option per existing folder (using the folder name as the label) plus a "New destination" option
-  - If they pick an existing destination, pre-fill the destination field from the folder name and skip asking for it again
-  - If they pick "New destination", prompt for the destination as normal
+- If **trips are returned**, use AskUserQuestion to ask the user:
+  - "Which trip would you like to search hotels for?" with one option per trip (label format: `[destination] — [check-in] to [check-out], [N] travelers`) plus a "New trip" option
+  - If they pick an existing trip, pre-fill destination, check-in, check-out, and traveler count from that trip record — skip asking for those fields
+  - If they pick "New trip", prompt for all details as normal
 
 Then collect any remaining missing details via AskUserQuestion:
-- Destination / neighborhood / property name — skip if pre-filled from an existing folder
-- Check-in date (YYYY-MM-DD)
-- Check-out date (YYYY-MM-DD)
-- Number of guests
+- Destination / neighborhood / property name — skip if pre-filled from a stored trip
+- Check-in date (YYYY-MM-DD) — skip if pre-filled
+- Check-out date (YYYY-MM-DD) — skip if pre-filled
+- Number of guests — skip if pre-filled
 - Number of rooms (default 1 if not specified)
 
 **Experiences** — ask the user which experiences they plan to attend, using multiSelect: true. Offer 3–4 destination-appropriate options based on the destination (e.g., for Orlando: Theme Parks, Disney World, Universal Studios, International Drive, Beaches). Always include an "Other / No preference" option. The user may select multiple.
@@ -74,11 +74,12 @@ If any MCP searches succeeded, edit `results.md` to replace the N/A rows with th
 
 For each site, find the top **1–4** highest-quality or most preferred options. Prioritize by:
 1. **Experience alignment** — properties close to or purpose-built for the selected experiences rank first
-2. **Guest rating** (highest rated first — e.g. 8.5+ on Expedia/Kayak, 4.5+/5 on Google)
-3. **Star class** (prefer 3-star and above when available at reasonable price)
-4. **Value** (best rating-to-price ratio)
+2. **Amenities** — must have pool; prefer properties that also offer a gym, on-site family dining or a quality restaurant, and resort-style perks (spa, concierge, kids' club, free breakfast). Flag these in results.
+3. **Guest rating** (target 8.5+/10 on Expedia/Kayak, 4.3+/5 on Google — mid-tier minimum)
+4. **Star class** (4-star and above preferred; 3-star only if ratings and amenities are exceptional)
+5. **Value** (best quality-to-price ratio within mid/upper tier)
 
-Avoid surfacing low-rated properties (below 7.0/10 or 3.5/5) unless nothing better is available.
+**Skip** properties that: are below 4-star or 8.0/10, lack a pool, or are clearly budget/economy class (e.g. motels, hostels, extended-stay). If a site returns only budget options, note it rather than surfacing low-quality results.
 
 If a site still cannot be searched after MCP attempt, leave it as "N/A" and continue.
 
