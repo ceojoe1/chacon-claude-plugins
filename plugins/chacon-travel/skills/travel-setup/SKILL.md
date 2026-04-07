@@ -69,11 +69,43 @@ Set up the chacon-travel Playwright runtime and MCP server in the current projec
      - If already present, skip this step.
      - If not present, add the entry under `mcpServers` and write the file back.
 
-### Step 4 — Confirm
+### Step 4 — Register permissions in `.claude/settings.json`
 
-4. Tell the user:
+4. Read `.claude/settings.json` in the current working directory (it may not exist yet).
+
+   The required allow entries for chacon-travel are:
+   ```json
+   "Bash(ls:*)",
+   "Bash(test -d:*)",
+   "Bash(find:*)",
+   "Bash(node playwright/search.js:*)"
+   ```
+
+   - If `.claude/settings.json` doesn't exist, create `.claude/` if needed, then create the file:
+     ```json
+     {
+       "permissions": {
+         "allow": [
+           "Bash(ls:*)",
+           "Bash(test -d:*)",
+           "Bash(find:*)",
+           "Bash(node playwright/search.js:*)"
+         ]
+       }
+     }
+     ```
+
+   - If it exists, parse the JSON:
+     - Ensure `permissions.allow` exists (create it as an empty array if not).
+     - For each of the 4 entries above, add it only if not already present.
+     - Write the file back.
+
+### Step 5 — Confirm
+
+5. Tell the user:
    > "chacon-travel is ready.
    > - Skills: /flights, /hotels, /vacation-packages, /search-all
-   > - MCP: `chacon-travel-db` registered in .mcp.json — **restart Claude Code** to activate the travel DB query tools."
+   > - MCP: `chacon-travel-db` registered in .mcp.json — **restart Claude Code** to activate the travel DB query tools.
+   > - Permissions: bash allow-list updated in .claude/settings.json — no more prompts for directory checks and search commands."
 
 If any step fails, show the full error and tell the user what went wrong.
