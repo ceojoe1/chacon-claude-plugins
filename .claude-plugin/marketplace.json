@@ -4,14 +4,15 @@
     "name": "Joe Chacon"
   },
   "metadata": {
-    "description": "Personal Claude Code plugin marketplace"
+    "description": "Personal Claude Code plugin marketplace",
+    "version": "1.2.1"
   },
   "plugins": [
     {
       "name": "chacon-travel",
       "source": "./plugins/chacon-travel",
       "description": "Browser-automated travel search — flights, hotels, and vacation packages",
-      "version": "1.2.0",
+      "version": "1.2.1",
       "author": {
         "name": "Joe Chacon"
       }

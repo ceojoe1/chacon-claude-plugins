@@ -2,7 +2,8 @@
   "mcpServers": {
     "chacon-travel-db": {
       "command": "node",
-      "args": ["./mcp/travel-db.js"]
+      "args": ["./mcp/travel-db.js"],
+      "defer_loading": true
     }
   }
 }

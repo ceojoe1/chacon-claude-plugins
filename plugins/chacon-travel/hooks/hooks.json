@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "if [ -d ./playwright ] && [ ! -d ./playwright/node_modules ]; then echo '[chacon-travel] Installing Playwright dependencies...' && cd ./playwright && npm install --silent && echo '[chacon-travel] Playwright dependencies installed.'; fi"
+            "command": "bash ${CLAUDE_PLUGIN_ROOT}/.claude-plugin/setup.sh"
           }
         ]
       }
