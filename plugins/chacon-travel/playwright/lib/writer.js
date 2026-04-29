@@ -6,48 +6,117 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TRAVEL_PLANS_DIR = path.resolve(__dirname, '../../travel_plans');
 
 /**
+ * Returns the current time formatted in the local timezone, e.g.
+ * "2026-04-29 2:30:45 PM MDT".
+ */
+function localTimestamp() {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const datePart = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  // toLocaleTimeString gives "2:30:45 PM MDT" with hour12 + timeZoneName
+  const timeWithTz = now.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+    timeZoneName: 'short',
+  });
+  return `${datePart} ${timeWithTz}`;
+}
+
+/**
+ * Groups results by site, preserving first-appearance order.
+ */
+function groupBySite(results) {
+  const bySite = new Map();
+  for (const r of results) {
+    if (!bySite.has(r.site)) bySite.set(r.site, []);
+    bySite.get(r.site).push(r);
+  }
+  return bySite;
+}
+
+/**
  * Builds the results.md content for a flights search.
+ * Results are grouped under "#### <Site Name>" subheaders so it's easy to
+ * scan per-site, and the redundant per-row Site column is dropped.
  */
 function buildFlightsTable(results) {
-  const header = '| Site | Airline | Departure → Return | Stops | Per Person | Total (Group) |';
-  const divider = '|---|---|---|---|---|---|';
-  const rows = results.map(r => {
-    if (r.error) {
-      return `| ${r.site} | N/A | N/A | N/A | N/A | N/A |`;
+  const sections = [];
+  for (const [site, rows] of groupBySite(results)) {
+    sections.push(`#### ${site}`);
+    sections.push('');
+    if (rows.length === 1 && rows[0].error) {
+      sections.push(`_${rows[0].error}_`);
+      sections.push('');
+      continue;
     }
-    return `| ${r.site} | ${r.airline} | ${r.route} | ${r.stops} | ${r.perPerson} | ${r.total} |`;
-  });
-  return [header, divider, ...rows].join('\n');
+    sections.push('| Airline | Departure → Return | Stops | Includes | Per Person | Total (Group) |');
+    sections.push('|---|---|---|---|---|---|');
+    for (const r of rows) {
+      if (r.error) {
+        sections.push(`| _${r.error}_ | — | — | — | — | — |`);
+      } else {
+        sections.push(`| ${r.airline} | ${r.route} | ${r.stops} | ${r.includes || '—'} | ${r.perPerson} | ${r.total} |`);
+      }
+    }
+    sections.push('');
+  }
+  return sections.join('\n').trimEnd();
 }
 
 /**
  * Builds the results.md content for a hotels search.
  */
 function buildHotelsTable(results) {
-  const header = '| Site | Property | Type | Rating | Per Night | Total Stay | Notes |';
-  const divider = '|---|---|---|---|---|---|---|';
-  const rows = results.map(r => {
-    if (r.error) {
-      return `| ${r.site} | N/A | — | — | — | — | ${r.error} |`;
+  const sections = [];
+  for (const [site, rows] of groupBySite(results)) {
+    sections.push(`#### ${site}`);
+    sections.push('');
+    if (rows.length === 1 && rows[0].error) {
+      sections.push(`_${rows[0].error}_`);
+      sections.push('');
+      continue;
     }
-    return `| ${r.site} | ${r.property} | ${r.type} | ${r.rating} | ${r.perNight} | ${r.total} | ${r.notes || ''} |`;
-  });
-  return [header, divider, ...rows].join('\n');
+    sections.push('| Property | Type | Rating | Per Night | Total Stay | Notes |');
+    sections.push('|---|---|---|---|---|---|');
+    for (const r of rows) {
+      if (r.error) {
+        sections.push(`| _${r.error}_ | — | — | — | — | — |`);
+      } else {
+        sections.push(`| ${r.property} | ${r.type} | ${r.rating} | ${r.perNight} | ${r.total} | ${r.notes || ''} |`);
+      }
+    }
+    sections.push('');
+  }
+  return sections.join('\n').trimEnd();
 }
 
 /**
  * Builds the results.md content for a vacation-packages search.
  */
 function buildPackagesTable(results) {
-  const header = '| Site | Package / Hotel | Flight Cost | Hotel Cost | Per Person | Total (Group) |';
-  const divider = '|---|---|---|---|---|---|';
-  const rows = results.map(r => {
-    if (r.error) {
-      return `| ${r.site} | N/A | N/A | N/A | N/A | N/A |`;
+  const sections = [];
+  for (const [site, rows] of groupBySite(results)) {
+    sections.push(`#### ${site}`);
+    sections.push('');
+    if (rows.length === 1 && rows[0].error) {
+      sections.push(`_${rows[0].error}_`);
+      sections.push('');
+      continue;
     }
-    return `| ${r.site} | ${r.packageName} | ${r.flightCost} | ${r.hotelCost} | ${r.perPerson} | ${r.total} |`;
-  });
-  return [header, divider, ...rows].join('\n');
+    sections.push('| Package / Hotel | Flight Cost | Hotel Cost | Per Person | Total (Group) |');
+    sections.push('|---|---|---|---|---|');
+    for (const r of rows) {
+      if (r.error) {
+        sections.push(`| _${r.error}_ | — | — | — | — |`);
+      } else {
+        sections.push(`| ${r.packageName} | ${r.flightCost} | ${r.hotelCost} | ${r.perPerson} | ${r.total} |`);
+      }
+    }
+    sections.push('');
+  }
+  return sections.join('\n').trimEnd();
 }
 
 function buildInputsTable(params) {
@@ -86,7 +155,7 @@ function categoryLabel(category) {
  */
 export function writeResults({ params, results, date }) {
   const label = categoryLabel(params.category);
-  const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+  const timestamp = localTimestamp();
 
   let tableContent;
   if (params.category === 'flights') {

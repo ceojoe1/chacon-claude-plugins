@@ -1,4 +1,4 @@
-import { humanDelay, detectCaptcha, selectAutocomplete } from '../sites/helpers.js';
+import { humanDelay, detectCaptcha, selectAutocomplete, inferFareIncludes } from '../sites/helpers.js';
 
 const SITE = 'Google Flights';
 const URL = 'https://www.google.com/travel/flights';
@@ -190,7 +190,8 @@ async function search(context, params) {
 
       if (results.some(r => r.perPerson === pp && r.stops === stops)) continue;
 
-      results.push({ airline, route, stops, perPerson: pp, total });
+      const includes = inferFareIncludes(cardInfo, airline);
+      results.push({ airline, route, stops, includes, perPerson: pp, total });
       if (results.length >= 3) break;
     }
 

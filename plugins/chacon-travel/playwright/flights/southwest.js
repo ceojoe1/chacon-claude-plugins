@@ -1,4 +1,4 @@
-import { humanDelay, detectCaptcha, parsePrice, selectAutocomplete } from '../sites/helpers.js';
+import { humanDelay, detectCaptcha, parsePrice, selectAutocomplete, inferFareIncludes, extractIATA } from '../sites/helpers.js';
 
 const SITE = 'Southwest';
 const URL = 'https://www.southwest.com';
@@ -26,26 +26,53 @@ async function search(context, params) {
       await humanDelay(300, 500);
     }
 
+    // Pick airport autocomplete option scoped to a specific IATA code.
+    // Southwest renders many [role="option"] on the page (trip-type dropdown,
+    // recent searches, etc.) so we filter to airport rows of the form
+    // "City, ST - IATA" and prefer the one matching our target code.
+    const pickAirportOption = async (iataCode) => {
+      if (iataCode) {
+        const exact = page.locator('[role="option"]').filter({
+          hasText: new RegExp(`-\\s*${iataCode}\\b`, 'i'),
+        }).first();
+        if (await exact.isVisible({ timeout: 3000 }).catch(() => false)) {
+          await exact.click();
+          return true;
+        }
+      }
+      // Fallback: first visible option that looks like an airport row
+      const anyAirport = page.locator('[role="option"]').filter({
+        hasText: /,\s*[A-Z]{2}\s*-\s*[A-Z]{3}/,
+      }).first();
+      if (await anyAirport.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await anyAirport.click();
+        return true;
+      }
+      return false;
+    };
+
     // Set origin
+    const originIATA = extractIATA(params.origin);
     const originField = page.locator('#originationAirportCode, [placeholder*="From"], [aria-label*="Depart"]').first();
     if (await originField.isVisible({ timeout: 3000 }).catch(() => false)) {
       await originField.click();
       await humanDelay(200, 400);
       await page.keyboard.press('Control+a');
       await page.keyboard.type(params.origin, { delay: 80 });
-      await humanDelay(600, 900);
-      await selectAutocomplete(page).catch(() => {});
+      await humanDelay(800, 1100);
+      await pickAirportOption(originIATA);
       await humanDelay(300, 500);
     }
 
     // Set destination
+    const destIATA = extractIATA(params.destination);
     const destField = page.locator('#destinationAirportCode, [placeholder*="To"], [aria-label*="Arrive"]').first();
     await destField.click();
     await humanDelay(200, 400);
     await page.keyboard.press('Control+a');
     await page.keyboard.type(params.destination, { delay: 80 });
-    await humanDelay(600, 900);
-    await page.locator('[role="option"]').first().click({ timeout: 5000 }).catch(() => {});
+    await humanDelay(800, 1100);
+    await pickAirportOption(destIATA);
     await humanDelay(300, 500);
 
     // Set departure date — triple-click to select, then type MM/DD/YYYY
@@ -86,46 +113,63 @@ async function search(context, params) {
       return { site: SITE, error: 'CAPTCHA: ' + (_cap2 || _cap) };
     }
 
-    // Extract results
-    // Southwest shows prices per person one-way — multiply by 2 × travelers for RT group total
+    // Extract results from body text. Southwest's results page uses CSS-module
+    // class names (e.g. fareOptionsContainer__2RRWu) that hash on each deploy,
+    // so DOM-based selectors are brittle. Body text is stable: each fare row
+    // looks like:
+    //   "# 1581 / 2386 ... Departs 5:10AM Arrives 9:30AM 1 stop ... DEN 5h 20m
+    //    247 Dollars$247  287 Dollars$287  357 Dollars$357  402 Dollars$402"
+    // Tier order: Basic, Choice, Choice Preferred, Choice Extra (one-way prices).
+    const bodyText = await page.locator('body').textContent({ timeout: 5000 }).catch(() => '');
     const results = [];
 
-    // Look for fare cards with price info
-    const fareCards = await page.locator('[class*="card"], [class*="flight-result"], [data-qa*="flight"]')
-      .filter({ hasText: '$' })
-      .all();
+    // Split into per-flight blocks on "# DDDD / DDDD" flight-number markers
+    const blocks = bodyText.split(/(?=#\s*\d{2,4}\s*\/\s*\d{2,4})/).slice(1);
 
-    for (const card of fareCards.slice(0, 2)) {
-      const cardText = await card.textContent().catch(() => '');
-      if (!cardText) continue;
+    for (const block of blocks) {
+      const departMatch = block.match(/Departs\s*(\d{1,2}:\d{2}\s*[AP]M)/i);
+      const arriveMatch = block.match(/Arrives\s*(\d{1,2}:\d{2}\s*[AP]M)/i);
+      const stopsMatch = block.match(/(Nonstop|\d+\s*stop)/i);
+      const durMatch = block.match(/(\d+h\s*\d+m)/);
+      // Extract tier prices. Southwest's body text concatenates the visible
+      // and screen-reader price labels into a run like:
+      //   "247 Dollars$247287 Dollars$287357 Dollars$357402 Dollars$402"
+      // (Basic, Choice, Choice Preferred, Choice Extra). Splitting on "Dollars"
+      // gives ["247 ", "$247287 ", "$287357 ", "$357402 ", "$402..."]. The
+      // price for each tier is the last 2-4 digit run in each segment before
+      // the "Dollars" delimiter (the tail digits of "$247287 " → "287").
+      const priceMatches = [];
+      const segments = block.split(/Dollars/i);
+      for (let i = 0; i < segments.length - 1; i++) {
+        const m = segments[i].match(/(\d{2,4})\s*$/);
+        if (!m) continue;
+        const p = parseFloat(m[1]);
+        if (p >= 50 && p <= 1500) priceMatches.push(p);
+      }
 
-      // Price shown per person one-way — find all prices and take the smallest
-      // that falls in a realistic one-way range ($50–$800), avoiding fee totals
-      const allPrices = [...cardText.matchAll(/\$(\d[\d,]*)/g)]
-        .map(m => parseFloat(m[1].replace(/,/g, '')))
-        .filter(p => p >= 50 && p <= 800);
-      if (allPrices.length === 0) continue;
+      if (!departMatch || !arriveMatch || priceMatches.length < 1) continue;
 
-      const oneWayPP = Math.min(...allPrices);
-      const rtPP = oneWayPP * 2;
+      const route = `${departMatch[1]} – ${arriveMatch[1]}` + (durMatch ? ` (${durMatch[1]})` : '');
+      const stops = stopsMatch ? stopsMatch[1] : '—';
+
+      // Emit one row per itinerary at the Basic tier (the cheapest fare).
+      // Southwest's body text makes higher tiers unreliable to parse — but the
+      // Includes column ("Carry-on, 2 bags (no seat)") already signals to the
+      // user that an upgrade is needed for seat selection.
+      const oneWay = Math.min(...priceMatches);
+      const rtPP = oneWay * 2;
       const groupTotal = rtPP * params.travelers;
-
-      const pp = '$' + rtPP.toLocaleString('en-US', { maximumFractionDigits: 0 });
-      const total = '$' + groupTotal.toLocaleString('en-US', { maximumFractionDigits: 0 });
-
-      // Extract stop info
-      const stopsMatch = cardText.match(/Nonstop|\d+ stop/i);
-      const stops = stopsMatch ? stopsMatch[0] : '—';
-
       results.push({
         airline: 'Southwest',
-        route: `${params.depart} → ${params.return}`,
+        route,
         stops,
-        perPerson: pp + ' RT',
-        total,
+        includes: inferFareIncludes('Go for Less Basic', 'Southwest'),
+        perPerson: '$' + rtPP.toLocaleString('en-US') + ' RT',
+        total: '$' + groupTotal.toLocaleString('en-US'),
       });
 
-      break; // Take the cheapest (Wanna Get Away) fare only
+      // Cap at the 3 cheapest itineraries (Southwest's default sort)
+      if (results.length >= 3) break;
     }
 
     if (results.length === 0) {

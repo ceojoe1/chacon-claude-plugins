@@ -1,4 +1,4 @@
-import { humanDelay, detectCaptcha, waitForCaptchaSolve } from '../sites/helpers.js';
+import { humanDelay, detectCaptcha, waitForCaptchaSolve, inferFareIncludes } from '../sites/helpers.js';
 
 const SITE = 'Kayak';
 
@@ -19,13 +19,17 @@ async function search(context, params) {
     await page.goto(buildUrl(params), { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await humanDelay(3000, 4000); // Kayak loads results asynchronously
 
-    // Wait for price text to appear — more reliable than waiting for specific class names
-    await page.waitForSelector('text=/ person', { timeout: 25_000 }).catch(() => {});
+    // Wait for an actual flight result card to appear. The class
+    // "Fxw9-result-item-container" wraps each itinerary; we filter to ones
+    // containing both a price AND an airline so we know real results loaded
+    // (not just the filter sidebar / ad placeholders).
+    await page.locator('.Fxw9-result-item-container').filter({
+      hasText: /\$\d{3,4}.*?(United|Southwest|American|Delta|JetBlue|Alaska|Frontier|Spirit)/i,
+    }).first().waitFor({ timeout: 30_000 }).catch(() => {});
     await humanDelay(1000, 2000);
 
-    // Check we have actual flight prices on the page before looking for CAPTCHA
-    const priceText = await page.locator('text=/ person').count().catch(() => 0);
-    if (priceText === 0) {
+    const cardCount = await page.locator('.Fxw9-result-item-container').count().catch(() => 0);
+    if (cardCount === 0) {
       const _cap = await detectCaptcha(page);
       if (_cap) {
         if (params.headed) {
@@ -39,80 +43,80 @@ async function search(context, params) {
       }
     }
 
+    // Pull text of all top-level result cards in one round trip
+    const cardTexts = await page.locator('.Fxw9-result-item-container').evaluateAll(els =>
+      els.map(el => el.innerText.replace(/\s+/g, ' ').trim()).filter(t => t.length > 50)
+    ).catch(() => []);
+
     const results = [];
+    for (const cardText of cardTexts) {
+      // Skip ad cards ("Book now, pay later", "paid placement") — they lack
+      // proper flight time pairs.
+      if (/paid placement|Book now, pay later/i.test(cardText)) continue;
+      // Must have at least one departure time pattern + airline + a price
+      if (!/\d{1,2}:\d{2}\s*[ap]m/i.test(cardText)) continue;
 
-    // Kayak shows "$297 / person" with "$1,186 total" — extract from page sections
-    // that contain an airline name + price pattern
-    const allSections = await page.locator('[role="listitem"], article, [class*="result"]')
-      .filter({ hasText: /\/ person/ })
-      .all();
+      const airline = cardText.match(/United Airlines|Southwest Airlines|American Airlines|Delta(?: Air Lines)?|JetBlue Airways|Alaska Airlines|Spirit Airlines|Frontier(?: Airlines)?/i)?.[0]
+        || cardText.match(/United|Southwest|American|Delta|JetBlue|Alaska|Spirit|Frontier/i)?.[0]
+        || 'See Kayak';
 
-    // Fallback: parse full page text into flight blocks
-    const pageText = allSections.length > 0 ? null : await page.textContent('body').catch(() => '');
-    const sourceItems = allSections.length > 0 ? allSections : null;
+      // Each card surfaces 1-2 fare tiers inline, e.g.:
+      //   "$409 Basic Economy Select $489 Economy Select"
+      //   "$434 Basic View Deal $514 Choice View Deal"
+      // Capture each "$NNN <TierName>" pair so we can show price-vs-amenity.
+      const tierPattern = /\$(\d{3,4})\s+(Basic Economy|Basic|Economy|Main Cabin|Choice|Standard|Flexible|First|Premium Economy)\b/gi;
+      const tiers = [...cardText.matchAll(tierPattern)].map(m => ({
+        price: parseFloat(m[1]),
+        tierName: m[2],
+      }));
 
-    if (sourceItems) {
-      for (const item of sourceItems.slice(0, 4)) {
-        const t = await item.textContent().catch(() => '');
-        if (!t) continue;
-        if (!t.match(/United|Southwest|American|Delta|JetBlue|Alaska/i)) continue;
+      // Fall back to the first $NNN if no tier label was found
+      if (tiers.length === 0) {
+        const fallback = cardText.match(/\$(\d{3,4})\b/);
+        if (!fallback) continue;
+        tiers.push({ price: parseFloat(fallback[1]), tierName: '' });
+      }
 
-        const ppMatch = t.match(/\$(\d[\d,]+)\s*\/\s*person/i);
-        const totalMatch = t.match(/\$([\d,]+)\s*total/i);
-        if (!ppMatch) continue;
+      // Time range — outbound leg
+      const timeMatch = cardText.match(/(\d{1,2}:\d{2}\s*[ap]m)\s*[–\-]\s*(\d{1,2}:\d{2}\s*[ap]m)/i);
+      const route = timeMatch ? `${timeMatch[1]} – ${timeMatch[2]}` : `${params.depart} → ${params.return}`;
+      const stops = cardText.match(/nonstop|\d+\s*stop/i)?.[0] || '—';
+      // Pick the longest "Xh Ym" duration on the card — the first match is
+      // typically a layover ("0h 40m layover"), not the total flight duration.
+      const durMatches = [...cardText.matchAll(/(\d+)h\s*(\d+)m/g)]
+        .map(m => ({ text: m[0], minutes: parseInt(m[1]) * 60 + parseInt(m[2]) }))
+        .filter(d => d.minutes >= 60); // exclude sub-hour layovers
+      durMatches.sort((a, b) => b.minutes - a.minutes);
+      const dur = durMatches[0]?.text || '';
+      const routeFull = dur ? `${route} (${dur})` : route;
 
-        const ppNum = parseFloat(ppMatch[1].replace(/,/g, ''));
-        const totalNum = totalMatch ? parseFloat(totalMatch[1].replace(/,/g, '')) : ppNum * params.travelers;
-        if (ppNum < 100 || ppNum > 5000) continue;
+      for (const tier of tiers.slice(0, 2)) {
+        if (tier.price < 100 || tier.price > 5000) continue;
+        const dedupKey = `${airline}:${tier.price}:${stops}:${dur}`;
+        if (results.some(r => r._key === dedupKey)) continue;
 
-        const airline = t.match(/United Airlines|Southwest Airlines|American Airlines|Delta|JetBlue Airways|Alaska Airlines/)?.[0] ||
-                        t.match(/United|Southwest|American|Delta|JetBlue|Alaska/)?.[0] || 'See Kayak';
-        const stops = t.match(/Nonstop|[1-3] stop/i)?.[0] || '—';
-        const dur = t.match(/(\d+h\s*\d+m)/)?.[1] || '';
-
-        // Deduplicate — skip if same price already captured
-        if (results.some(r => r._ppNum === ppNum)) continue;
-
+        // Build a tier-specific context for inferFareIncludes — Kayak's tier
+        // name is more reliable than scanning the whole card text.
+        const includesContext = tier.tierName ? `${tier.tierName}` : cardText;
         results.push({
-          _ppNum: ppNum,
+          _key: dedupKey,
           airline,
-          route: `${params.depart} → ${params.return}` + (dur ? ` (${dur})` : ''),
+          route: routeFull,
           stops,
-          perPerson: '$' + ppNum.toLocaleString('en-US', { maximumFractionDigits: 0 }) + ' RT',
-          total: '$' + totalNum.toLocaleString('en-US', { maximumFractionDigits: 0 }),
+          includes: inferFareIncludes(includesContext, airline),
+          perPerson: '$' + tier.price.toLocaleString('en-US') + ' RT',
+          total: '$' + (tier.price * params.travelers).toLocaleString('en-US'),
         });
-        if (results.length >= 2) break;
       }
-    }
 
-    // Fallback: regex scan on full page text
-    if (results.length === 0 && pageText) {
-      const blocks = pageText.split(/\$\d[\d,]+\s*\/\s*person/i);
-      for (let i = 1; i < blocks.length && results.length < 2; i++) {
-        const chunk = blocks[i - 1].slice(-200) + '$' + blocks[i].slice(0, 200);
-        const ppMatch = chunk.match(/\$(\d[\d,]+)\s*\/\s*person/i);
-        const totalMatch = chunk.match(/\$([\d,]+)\s*total/i);
-        if (!ppMatch) continue;
-        const ppNum = parseFloat(ppMatch[1].replace(/,/g, ''));
-        const totalNum = totalMatch ? parseFloat(totalMatch[1].replace(/,/g, '')) : ppNum * params.travelers;
-        if (ppNum < 100 || ppNum > 5000) continue;
-        const airline = chunk.match(/United|Southwest|American|Delta|JetBlue|Alaska/i)?.[0] || 'See Kayak';
-        results.push({
-          airline,
-          route: `${params.depart} → ${params.return}`,
-          stops: chunk.match(/Nonstop|[1-3] stop/i)?.[0] || '—',
-          perPerson: '$' + ppNum.toLocaleString('en-US', { maximumFractionDigits: 0 }) + ' RT',
-          total: '$' + totalNum.toLocaleString('en-US', { maximumFractionDigits: 0 }),
-        });
-      }
+      if (results.length >= 4) break;
     }
 
     if (results.length === 0) {
       return { site: SITE, error: 'No results parsed — selectors may need updating' };
     }
 
-    // Strip internal dedup keys before returning
-    results.forEach(r => delete r._ppNum);
+    results.forEach(r => delete r._key);
     return { site: SITE, results };
 
   } catch (err) {
