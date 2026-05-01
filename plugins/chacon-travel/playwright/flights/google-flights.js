@@ -161,7 +161,34 @@ async function search(context, params) {
         await card.click({ position: { x: 60, y: 30 }, timeout: 10_000 }).catch(() => {});
       }
 
-      const returnTexts = await scrapeReturnPanel(page);
+      let returnTexts = await scrapeReturnPanel(page);
+
+      // Retry-once: if the return panel scrape came back empty, try a clean
+      // re-navigation + re-click. Sometimes the first click misses the SPA
+      // route on slower carriers (e.g. American with operated-by sub-airlines).
+      if (returnTexts.length === 0) {
+        console.log(`  [Google Flights] Card ${i} (${departing.airline}): 0 returns — retrying`);
+        await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+        await page.locator('text=/Top departing flights/i').first()
+          .waitFor({ timeout: 15_000 }).catch(() => {});
+        await page.locator('li.pIav2d').first().waitFor({ timeout: 15_000 }).catch(() => {});
+        await humanDelay(600, 1000);
+        const retryCard = page.locator('li.pIav2d').nth(i);
+        await retryCard.scrollIntoViewIfNeeded().catch(() => {});
+        const retryTime = retryCard.locator('text=/\\d{1,2}:\\d{2}\\s*[AP]M\\s*[–\\-]\\s*\\d{1,2}:\\d{2}\\s*[AP]M/i').first();
+        const retryHasTime = await retryTime.count().then(c => c > 0).catch(() => false);
+        if (retryHasTime) {
+          await retryTime.click({ timeout: 10_000 }).catch(() => {});
+        } else {
+          await retryCard.click({ position: { x: 60, y: 30 }, timeout: 10_000 }).catch(() => {});
+        }
+        returnTexts = await scrapeReturnPanel(page);
+        if (returnTexts.length === 0) {
+          console.log(`  [Google Flights] Card ${i} (${departing.airline}): still 0 returns after retry — skipping`);
+        } else {
+          console.log(`  [Google Flights] Card ${i} (${departing.airline}): retry recovered ${returnTexts.length} return(s)`);
+        }
+      }
 
       // Navigate back to the departing list for the next iteration.
       // Defer this so we don't navigate after the last card.

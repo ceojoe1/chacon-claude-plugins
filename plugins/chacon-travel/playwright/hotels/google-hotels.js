@@ -1,10 +1,15 @@
-import { humanDelay, detectCaptcha, parsePrice, selectAutocomplete } from '../sites/helpers.js';
+import { humanDelay, detectCaptcha } from '../sites/helpers.js';
 
 const SITE = 'Google Hotels';
-const URL = 'https://www.google.com/travel/hotels';
 
 function nightCount(depart, ret) {
   return Math.round((new Date(ret) - new Date(depart)) / (1000 * 60 * 60 * 24));
+}
+
+// Direct ?q= search URL — bypasses the homepage form entirely.
+// Per debugging/hotels/google-hotels/google-hotels.md.
+function buildUrl(params) {
+  return `https://www.google.com/travel/search?q=${encodeURIComponent(params.destination)}&hl=en`;
 }
 
 async function search(context, params) {
@@ -12,76 +17,46 @@ async function search(context, params) {
   const nights = nightCount(params.depart, params.return);
 
   try {
-    await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    await humanDelay(1000, 1500);
+    await page.goto(buildUrl(params), { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await humanDelay(1500, 2500);
 
-    const _cap = await detectCaptcha(page); if (_cap) {
-      return { site: SITE, error: 'CAPTCHA: ' + _cap };
-    }
+    const cap = await detectCaptcha(page);
+    if (cap) return { site: SITE, error: 'CAPTCHA: ' + cap };
 
-    // --- Set destination ---
-    // Clicking the search field on the homepage, typing, and selecting autocomplete
-    // auto-navigates to the hotel results page for that destination.
-    const searchField = page.locator('[aria-label="Search for places, hotels and more"]').first();
-    await searchField.click({ timeout: 5000 });
-    await humanDelay(400, 600);
-    await page.keyboard.press('Control+a');
-    await page.keyboard.type(params.destination, { delay: 80 });
-    await humanDelay(800, 1200);
-    await selectAutocomplete(page);
-    // Wait for page to navigate to hotel results
-    await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => {});
-    await humanDelay(1500, 2000);
-    console.log(`      [GH] after destination: ${page.url().substring(0, 120)}`);
-
-    // --- Set dates by typing into the Check-in / Check-out inputs ---
-    // The [data-iso] calendar cells carry a Google jsaction "clickonly" handler
-    // that silently ignores Playwright/JS-dispatched clicks (likely an
-    // isTrusted/coordinate check in Google's event delegate). Real coordinate
-    // clicks work, but they're brittle in headless. The inputs themselves are
-    // not readOnly and accept MM/DD/YYYY typed values + Tab to commit.
+    // --- Set check-in / check-out via the calendar inputs ---
+    // Google's [data-iso] cells silently swallow Playwright clicks (likely an
+    // isTrusted check), but the visible inputs accept typed MM/DD/YYYY values
+    // followed by Tab to commit. Focus instead of click — the calendar
+    // popover's Material ripple intercepts pointer events headlessly.
     const toMDY = (iso) => {
       const [y, m, d] = iso.split('-');
       return `${m}/${d}/${y}`;
     };
-
-    const checkInInput = page.locator('input[aria-label="Check-in"]').first();
-    const checkOutInput = page.locator('input[aria-label="Check-out"]').first();
-
-    const checkInVisible = await checkInInput.isVisible({ timeout: 3000 }).catch(() => false);
-    console.log(`      [GH] check-in input visible: ${checkInVisible}`);
-    if (!checkInVisible) {
-      return { site: SITE, error: 'Check-in input not found' };
-    }
-
-    // Focus the field, select all existing text via keyboard, then type. We
-    // avoid .click() because the calendar popover's Material ripple overlay
-    // intercepts pointer events headlessly. .focus() works without any click.
-    const typeDate = async (input, iso, label) => {
+    const typeDate = async (input, iso) => {
       await input.focus();
-      await humanDelay(200, 400);
+      await humanDelay(150, 300);
       await page.keyboard.press('Control+a');
       await page.keyboard.press('Delete');
-      await page.keyboard.type(toMDY(iso), { delay: 50 });
+      await page.keyboard.type(toMDY(iso), { delay: 40 });
       await page.keyboard.press('Tab');
-      await humanDelay(600, 900);
-      const v = await input.inputValue({ timeout: 1000 }).catch(() => '');
-      console.log(`      [GH] ${label} field reads: "${v}"`);
-      return v;
+      await humanDelay(400, 700);
     };
 
-    await typeDate(checkInInput, params.depart, 'check-in');
-    await typeDate(checkOutInput, params.return, 'check-out');
-
-    // Close calendar if Done is visible (Tab usually closes it, but be safe).
-    const doneBtn = page.locator('button').filter({ hasText: /^Done$/ }).last();
-    if (await doneBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await doneBtn.click();
-      await humanDelay(600, 900);
+    const checkIn = page.locator('input[aria-label="Check-in"]').first();
+    const checkOut = page.locator('input[aria-label="Check-out"]').first();
+    if (await checkIn.isVisible({ timeout: 5000 }).catch(() => false)) {
+      await typeDate(checkIn, params.depart);
+      await typeDate(checkOut, params.return);
     }
 
-    // --- Set guests ---
-    // Google Hotels defaults to 2 adults, so adjust either direction.
+    // Close calendar if a Done button is showing.
+    const doneBtn = page.locator('button').filter({ hasText: /^Done$/ }).last();
+    if (await doneBtn.isVisible({ timeout: 800 }).catch(() => false)) {
+      await doneBtn.click().catch(() => {});
+      await humanDelay(400, 700);
+    }
+
+    // --- Set guests (Google defaults to 2) ---
     if (params.travelers !== 2) {
       const opened = await page.evaluate(() => {
         const btn = Array.from(document.querySelectorAll('[role="button"]'))
@@ -89,19 +64,17 @@ async function search(context, params) {
         if (btn) { btn.click(); return true; }
         return false;
       });
-      console.log(`      [GH] travelers picker opened: ${opened}`);
       if (opened) {
-        await humanDelay(600, 900);
+        await humanDelay(500, 800);
         const delta = params.travelers - 2;
         const btnLabel = delta > 0 ? 'Add adult' : 'Remove adult';
         const adjustBtn = page.locator(`[aria-label="${btnLabel}"]`).first();
         if (await adjustBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
           for (let i = 0; i < Math.abs(delta); i++) {
             await adjustBtn.click();
-            await humanDelay(200, 300);
+            await humanDelay(150, 250);
           }
         }
-        await humanDelay(400, 600);
         const pickerDone = page.locator('button').filter({ hasText: /^Done$/ }).last();
         if (await pickerDone.isVisible({ timeout: 1000 }).catch(() => false)) {
           await pickerDone.click();
@@ -110,84 +83,243 @@ async function search(context, params) {
       }
     }
 
-    // --- Click Search to apply the updated dates/guests ---
+    // Click Search to apply dates + guest changes.
     const searchBtn = page.locator('[aria-label="Search"]').first();
     if (await searchBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
       await searchBtn.click({ force: true });
-      await page.waitForLoadState('networkidle', { timeout: 20_000 }).catch(() => {});
-      await humanDelay(2000, 3000);
+      await page.waitForLoadState('networkidle', { timeout: 15_000 }).catch(() => {});
+      await humanDelay(1500, 2500);
     }
 
-    console.log(`      [GH] results URL: ${page.url().substring(0, 150)}`);
+    // --- Locate the hotel-card grid ---
+    // Per the debug doc, the card list lives under main > c-wiz > span > c-wiz.
+    // Each c-wiz[N] (typically 3..N) inside is one hotel card. We grab the
+    // top 8 visible cards and iterate them.
+    await page.locator('main c-wiz span c-wiz c-wiz').first()
+      .waitFor({ timeout: 15_000 })
+      .catch(() => {});
+    await humanDelay(1000, 1500);
 
-    const _cap2 = await detectCaptcha(page); if (_cap2) {
-      return { site: SITE, error: 'CAPTCHA: ' + _cap2 };
+    // Filter c-wiz children to ones that look like real hotel cards AND
+    // extract each card's detail-page link. Clicking the card via Playwright
+    // is unreliable (Google's jsaction handlers ignore synthetic clicks); we
+    // navigate directly via the card's <a href> instead.
+    const hotelCardHandles = await page.evaluate(() => {
+      const all = Array.from(document.querySelectorAll('main c-wiz span c-wiz > c-wiz'));
+      return all
+        .map((el, idx) => {
+          const text = el.innerText.replace(/\s+/g, ' ').trim();
+          // Find the anchor that links to this hotel's detail page.
+          const link = el.querySelector('a[href*="/travel/"]');
+          const href = link ? link.href : null;
+          return { idx, text, href };
+        })
+        .filter(({ text, href }) =>
+          href
+          && /\$\d{2,5}/.test(text)
+          && !/^Sponsored\b/i.test(text)
+          && !/results?$/i.test(text)
+          && !/Prices in this area/i.test(text)
+          && !/Hotels nearby/i.test(text)
+        );
+    }).catch(() => []);
+
+    if (hotelCardHandles.length === 0) {
+      return { site: SITE, error: 'No hotel cards passed filter (sponsored/info-only?)' };
     }
+    const maxCards = Math.min(hotelCardHandles.length, 8);
+    console.log(`  [Google Hotels] ${hotelCardHandles.length} qualifying hotel cards — drilling top ${maxCards}`);
 
-    // --- Extract results ---
-    // Wait for hotel cards to render
-    await page.waitForFunction(() => {
-      const body = document.body.innerText;
-      return body.includes('per night') || body.includes('/night') || body.includes('$');
-    }, { timeout: 10_000 }).catch(() => null);
+    // Snapshot results-page URL so we can return after each detail navigation.
+    const resultsUrl = page.url();
 
-    const bodyText = await page.evaluate(() => document.body.innerText).catch(() => '');
-    console.log(`      [GH] body snippet: ${bodyText.replace(/\s+/g, ' ').substring(0, 400)}`);
+    const allRows = [];
+    const seenHotels = new Set();
 
-    // Find price elements (per night format on Google Hotels)
-    const priceEls = await page.locator('*').filter({ hasText: /^\$[\d,]{2,6}$/ }).all();
-    console.log(`      [GH] price elements: ${priceEls.length}`);
+    for (let i = 0; i < maxCards; i++) {
+      const { text: cardText, href } = hotelCardHandles[i];
+      const flat = cardText.replace(/\s+/g, ' ').trim();
+      const nameLine = flat.split(/[•·]/)[0].split('$')[0].trim();
+      // Strip Google's promotional badges that bleed into the heading.
+      const property = nameLine
+        .replace(/\b(GREAT PRICE|GREAT DEAL|DEAL|GREAT VALUE)\b/gi, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim()
+        .slice(0, 80) || `Hotel ${i + 1}`;
+      if (seenHotels.has(property.toLowerCase())) continue;
+      seenHotels.add(property.toLowerCase());
 
-    const results = [];
-    const seen = new Set();
-
-    for (const el of priceEls.slice(0, 40)) {
-      const cardInfo = await el.evaluate(e => {
-        let p = e;
-        for (let i = 0; i < 8 && p; i++, p = p.parentElement) {
-          const text = p.innerText?.trim();
-          if (text && text.length > 30 && text.length < 1000) return text.replace(/\s+/g, ' ');
-        }
-        return null;
-      }).catch(() => null);
-
-      if (!cardInfo) continue;
-      const key = cardInfo.substring(0, 50);
-      if (seen.has(key)) continue;
-      seen.add(key);
-
-      const priceMatch = cardInfo.match(/\$[\d,]+/);
-      if (!priceMatch) continue;
-      const perNightNum = parseFloat(priceMatch[0].replace(/[^0-9.]/g, ''));
-      if (!perNightNum || perNightNum < 30 || perNightNum > 10000) continue;
-
-      console.log(`      [GH card] ${cardInfo.substring(0, 200)}`);
-
-      const totalNum = perNightNum * nights;
-      const nameMatch = cardInfo.match(/^([^$\n]{5,60})/);
-      const property = nameMatch ? nameMatch[1].trim() : 'Google Hotels Property';
-
-      const ratingMatch = cardInfo.match(/(\d\.\d)\s*(?:\/\s*5|out of)/);
+      const ratingMatch = flat.match(/(\d\.\d)\s*\(/);
       const rating = ratingMatch ? `⭐${ratingMatch[1]}` : '—';
 
-      if (results.some(r => r.perNight === '$' + perNightNum.toLocaleString('en-US', { maximumFractionDigits: 0 }))) continue;
+      // Navigate directly to the hotel's detail page via the card's <a href>.
+      // Wait for networkidle so price-source XHRs finish, then for #prices
+      // to render at least one $ value (not just the empty heading).
+      await page.goto(href, { waitUntil: 'domcontentloaded', timeout: 25_000 }).catch(() => {});
+      await page.waitForLoadState('networkidle', { timeout: 12_000 }).catch(() => {});
+      await page.locator('#prices').first().waitFor({ timeout: 12_000 }).catch(() => {});
+      // Wait for at least one price to actually appear inside #prices.
+      await page.waitForFunction(() => {
+        const p = document.querySelector('#prices');
+        return p && /\$\d{2,5}/.test(p.innerText || '');
+      }, { timeout: 10_000 }).catch(() => {});
 
-      results.push({
-        property,
-        type: 'Hotel',
-        rating,
-        perNight: '$' + perNightNum.toLocaleString('en-US', { maximumFractionDigits: 0 }),
-        total: '~$' + totalNum.toLocaleString('en-US', { maximumFractionDigits: 0 }),
-        notes: `${nights} nights`,
-      });
-      if (results.length >= 3) break;
+      // Switch the price dropdown to "Stay total". The trigger button can
+      // live above the #prices section (in the page header). Search the
+      // whole document for a button whose text matches the per-night /
+      // display-price affordance, or that has aria-haspopup="dialog".
+      const switched = await page.evaluate(() => {
+        const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
+        // Prefer literal text matches first — most stable.
+        const trigger =
+          buttons.find(b => /^(Per night|\$\s*per night)$/i.test(b.innerText.trim()))
+          || buttons.find(b => /per night/i.test(b.innerText) && b.innerText.length < 30)
+          || buttons.find(b => /^(Display|Sort|Filter)\s*by/i.test(b.innerText.trim()))
+          || buttons.find(b => b.getAttribute('aria-haspopup') === 'dialog'
+                                 && /night|total|price|display/i.test(b.innerText + (b.getAttribute('aria-label') || '')));
+        if (!trigger) {
+          // Last-ditch dump: list a few buttons so we can see what's there.
+          const sample = buttons.slice(0, 30).map(b => ({
+            text: b.innerText?.slice(0, 30).replace(/\s+/g, ' ').trim(),
+            popup: b.getAttribute('aria-haspopup'),
+            label: b.getAttribute('aria-label')?.slice(0, 40),
+          })).filter(b => b.text);
+          return { triggered: false, reason: 'no trigger button', sample };
+        }
+        trigger.scrollIntoView({ block: 'center' });
+        trigger.click();
+        return { triggered: true, label: trigger.innerText.slice(0, 50) };
+      }).catch(() => ({ triggered: false, reason: 'eval error' }));
+
+      console.log(`  [Google Hotels]   dropdown trigger: ${switched.triggered ? `"${switched.label}"` : `failed (${switched.reason})`}`);
+      if (switched.triggered) {
+        // Wait for the dialog/menu to actually become visible — the click
+        // returns immediately but the popup animates in.
+        await page.locator('[role="dialog"], [role="menu"]').first()
+          .waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {});
+
+        const dialogOpts = await page.evaluate(() => {
+          const dlg = document.querySelector('[role="dialog"], [role="menu"]');
+          if (!dlg) return null;
+          return Array.from(dlg.querySelectorAll('[role="menuitem"], [role="menuitemradio"], [role="option"], button, label, span'))
+            .map(el => el.innerText?.replace(/\s+/g, ' ').trim() || '')
+            .filter(t => t && t.length < 60)
+            .slice(0, 20);
+        }).catch(() => null);
+        console.log(`  [Google Hotels]   dialog options: ${JSON.stringify(dialogOpts)}`);
+
+        const stayTotalOption = page.locator('[role="dialog"], [role="menu"]')
+          .locator('text=/(Stay total|Total for \\d+ nights?|Total price)/i').first();
+        const optVisible = await stayTotalOption.isVisible({ timeout: 3_000 }).catch(() => false);
+        if (optVisible) {
+          // Capture an existing price string so we can wait for it to change
+          // after switching to Stay Total.
+          const beforePrice = await page.evaluate(() => {
+            const p = document.querySelector('#prices');
+            const m = p?.innerText.match(/\$[\d,]+/);
+            return m ? m[0] : null;
+          }).catch(() => null);
+
+          await stayTotalOption.click().catch(() => {});
+
+          // Wait for price text inside #prices to change (Stay Total values
+          // are higher than per-night, so the displayed string differs).
+          await page.waitForFunction(prev => {
+            const p = document.querySelector('#prices');
+            const m = p?.innerText.match(/\$[\d,]+/);
+            return m && m[0] !== prev;
+          }, beforePrice, { timeout: 6_000 }).catch(() => {});
+          await humanDelay(500, 800);
+          console.log(`  [Google Hotels]   Stay total switched (${beforePrice} → updated)`);
+        } else {
+          console.log(`  [Google Hotels]   Stay total option NOT FOUND in dialog`);
+        }
+      }
+
+      // Scrape the price-option list. Per the debug doc:
+      //   #prices > c-wiz.K1smNd > c-wiz.tuyxUe > div > section > div.A5WLXb > c-wiz > div
+      // Fall back to a more permissive selector if the strict path doesn't match.
+      const optionTexts = await page.evaluate(() => {
+        const tryPaths = [
+          '#prices c-wiz.K1smNd c-wiz.tuyxUe section div.A5WLXb c-wiz > div',
+          '#prices c-wiz section c-wiz > div',
+          '#prices section c-wiz',
+          '#prices section',
+          '#prices',
+        ];
+        let container = null;
+        for (const sel of tryPaths) {
+          container = document.querySelector(sel);
+          if (container) break;
+        }
+        if (!container) return [];
+        // Cast a wider net — any descendant with a price + provider text.
+        return Array.from(container.querySelectorAll('div, a, li'))
+          .map(el => el.innerText?.replace(/\s+/g, ' ').trim() || '')
+          .filter(t => /\$\d{2,5}/.test(t) && t.length < 300 && !/sponsored/i.test(t));
+      }).catch(() => []);
+
+      console.log(`  [Google Hotels] ${property}: found ${optionTexts.length} price option(s)`);
+
+      // Parse each option. With Stay Total enabled the captured number is
+      // the total for the whole stay; per-night = total / nights.
+      const KNOWN_SOURCES = [
+        'Booking.com', 'Expedia', 'Hotels.com', 'Agoda', 'Priceline',
+        'Trip.com', 'Trivago', 'Super.com', 'Orbitz', 'Hotwire',
+        'Travelocity', 'Vio.com', 'Snaptravel', 'Kayak', 'Google Hotels',
+      ];
+      const options = [];
+      for (const text of optionTexts) {
+        const priceMatch = text.match(/\$([\d,]+)/);
+        if (!priceMatch) continue;
+        const total = parseFloat(priceMatch[1].replace(/,/g, ''));
+        // Plausible-range filter: a 4-night stay total above $80 and below
+        // $20k. Single-night per-night prices below ~$80 will be rejected.
+        if (!total || total < 80 || total > 20_000) continue;
+        const matchedSource = KNOWN_SOURCES.find(s =>
+          text.toLowerCase().includes(s.toLowerCase())
+        );
+        const source = matchedSource || text.slice(0, 30).split('$')[0].trim() || 'Google Hotels';
+        options.push({ source, total });
+      }
+
+      // Take the 3 cheapest unique price points for this hotel.
+      const sorted = options.sort((a, b) => a.total - b.total);
+      const top3 = [];
+      const seenPrices = new Set();
+      for (const opt of sorted) {
+        if (seenPrices.has(opt.total)) continue;
+        seenPrices.add(opt.total);
+        top3.push(opt);
+        if (top3.length >= 3) break;
+      }
+
+      for (const opt of top3) {
+        const perNightNum = opt.total / nights;
+        allRows.push({
+          property,
+          type: 'Hotel',
+          rating,
+          perNight: '$' + perNightNum.toLocaleString('en-US', { maximumFractionDigits: 0 }),
+          total: '$' + opt.total.toLocaleString('en-US', { maximumFractionDigits: 0 }),
+          notes: `${nights} nights via ${opt.source}`,
+        });
+      }
+
+      // Navigate back to the results list for the next hotel. Going to the
+      // snapshot URL is more reliable than page.goBack() on Google's SPA.
+      if (i < maxCards - 1) {
+        await page.goto(resultsUrl, { waitUntil: 'domcontentloaded', timeout: 20_000 }).catch(() => {});
+        await page.locator('main c-wiz span c-wiz > c-wiz').first()
+          .waitFor({ timeout: 10_000 }).catch(() => {});
+        await humanDelay(700, 1100);
+      }
     }
 
-    if (results.length === 0) {
-      return { site: SITE, error: 'No results found' };
+    if (allRows.length === 0) {
+      return { site: SITE, error: 'No price options scraped from any hotel modal' };
     }
-
-    return { site: SITE, results };
+    return { site: SITE, results: allRows };
 
   } catch (err) {
     return { site: SITE, error: err.message };

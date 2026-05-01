@@ -8,6 +8,7 @@ const SITE_REGISTRY = {
     () => import('./flights/google-flights.js'),
     () => import('./flights/southwest.js'),
     () => import('./flights/expedia.js'),
+    () => import('./flights/orbitz.js'),
     () => import('./flights/kayak.js'),
     () => import('./flights/united.js'),
   ],

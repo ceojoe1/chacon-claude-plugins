@@ -18,20 +18,19 @@ function extractCode(str) {
   return m ? m[1] : str.replace(/[^a-zA-Z]/g, '').toUpperCase().slice(0, 3);
 }
 
-// Kayak direct URL with filter chain (per debugging/kayak.md):
-//   sort=price_a              cheapest first
-//   fs=airlines=-AS,flylocal  exclude Alaska, prefer flylocal carriers
-//      providers=-ONLY_DIRECT,AS,B6   exclude direct-only / AS / JetBlue
-//      cabin=-f                no first class
-//      stops=-2                max 1 stop
-//      hidebasic               hide basic economy fares
-// Removed bfc=1 + cfc=1 (require-free-bags) — they filtered nearly everything
-// down to Southwest only. Bag fees are added in the cost calc instead.
+// Kayak direct URL with a minimal filter chain:
+//   sort=bestflight_a   "Best" sort (Kayak's price+time+stops blend)
+//   cabin=-f            exclude first class
+//   stops=-2            max 1 stop
+//   hidebasic           hide basic economy fares
+// Removed: bfc=1/cfc=1 (require-free-bags — filtered everything to Southwest),
+// airlines=-AS, providers=-ONLY_DIRECT,AS,B6 (excluded Alaska + JetBlue + the
+// cheapest "book direct" provider links). Bag fees are added in the cost calc.
 function buildUrl(params) {
   const orig = extractCode(params.origin);
   const dest = extractCode(params.destination) || 'ORL';
   const adults = params.travelers > 1 ? `/${params.travelers}adults` : '';
-  const fs = encodeURIComponent('airlines=-AS,flylocal;providers=-ONLY_DIRECT,AS,B6;cabin=-f;stops=-2;hidebasic=hidebasic');
+  const fs = encodeURIComponent('cabin=-f;stops=-2;hidebasic=hidebasic');
   return `https://www.kayak.com/flights/${orig}-${dest}/${params.depart}/${params.return}${adults}?sort=bestflight_a&fs=${fs}`;
 }
 
