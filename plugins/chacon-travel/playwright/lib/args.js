@@ -18,7 +18,7 @@ Options:
   --sites        Comma-separated list of sites to run (default: all)
                  e.g. --sites "Google Flights,Expedia"
   --headed       Launch visible browser (default: headless)
-  --timeout      Per-site timeout ms (default: 60000)
+  --timeout      Per-site timeout ms (default: 120000)
   --pause        Keep browser open N seconds after search (default: 0, implies --headed)
   --no-parallel  Run sites sequentially instead of in parallel (default: parallel on)
 
@@ -51,7 +51,7 @@ export function parseArgs(argv) {
     default: {
       travelers: 1,
       rooms: 1,
-      timeout: 60000,
+      timeout: 120000,
       headed: false,
       pause: 0,
       sites: '',

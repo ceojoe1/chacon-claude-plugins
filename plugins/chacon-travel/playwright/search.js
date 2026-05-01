@@ -53,12 +53,55 @@ async function main() {
     console.log(`Sites filter: ${siteModules.map(m => m.default.siteName).join(', ')}\n`);
   }
 
-  const browser = await launchBrowser({ headed: params.headed });
+  // Compute window tile layout for headed parallel runs (e.g., 3 sites
+  // side-by-side). Headless or single-site → no tiling, share one browser.
+  const tileLayout = (params.headed && params.parallel && siteModules.length > 1)
+    ? computeTiles(siteModules.length)
+    : null;
+
+  // When tiling, each site gets its own browser launch (so its window has its
+  // own position/size args). Otherwise share one browser across all contexts.
+  const sharedBrowser = tileLayout ? null : await launchBrowser({ headed: params.headed });
+  const perSiteBrowsers = [];
 
   /** Run one site search with its own browser context and a timeout guard. */
-  async function runSite(mod) {
+  async function runSite(mod, idx) {
     const searchFn = mod.default;
+    let browser;
+    if (tileLayout) {
+      const tile = tileLayout[idx];
+      browser = await launchBrowser({ headed: true, window: tile });
+      perSiteBrowsers.push(browser);
+    } else {
+      browser = sharedBrowser;
+    }
+    // Keep viewport at the default 1440x900 so sites render their desktop
+    // layout regardless of window size. The window itself is tiled smaller
+    // but the page sees a full-width viewport (with internal scroll).
     const context = await newStealthContext(browser);
+    // Belt-and-suspenders: enforce window position/size at runtime via CDP
+    // since Chrome sometimes ignores --window-position / --window-size launch
+    // args. Apply on every new page in this context.
+    if (tileLayout) {
+      const tile = tileLayout[idx];
+      // Compute zoom so the 1440px viewport scales to fit the tile width,
+      // leaving a small margin for scrollbars / chrome.
+      const zoom = Math.min(1, (tile.width - 20) / 1440);
+      // Apply zoom to every navigated page via init script.
+      await context.addInitScript(z => {
+        document.documentElement.style.zoom = z;
+      }, zoom);
+      context.on('page', async page => {
+        try {
+          const session = await context.newCDPSession(page);
+          const { windowId } = await session.send('Browser.getWindowForTarget');
+          await session.send('Browser.setWindowBounds', {
+            windowId,
+            bounds: { left: tile.x, top: tile.y, width: tile.width, height: tile.height, windowState: 'normal' },
+          });
+        } catch {/* CDP not always available — falls back to launch args */}
+      });
+    }
     try {
       console.log(`  Searching ${searchFn.siteName || '...'}...`);
       const result = await Promise.race([
@@ -75,10 +118,22 @@ async function main() {
     }
   }
 
+  /** Tile N windows across a 1920x1080 screen (typical desktop). */
+  function computeTiles(n) {
+    const screenW = 1920, screenH = 1040; // leave taskbar room
+    const w = Math.floor(screenW / n);
+    return Array.from({ length: n }, (_, i) => ({
+      x: i * w,
+      y: 0,
+      width: w,
+      height: screenH,
+    }));
+  }
+
   // Run sites in parallel (default) or sequentially (--no-parallel)
   let rawResults;
   if (params.parallel) {
-    const settled = await Promise.allSettled(siteModules.map(mod => runSite(mod)));
+    const settled = await Promise.allSettled(siteModules.map((mod, i) => runSite(mod, i)));
     rawResults = settled.map((s, i) =>
       s.status === 'fulfilled'
         ? s.value
@@ -86,8 +141,8 @@ async function main() {
     );
   } else {
     rawResults = [];
-    for (const mod of siteModules) {
-      rawResults.push(await runSite(mod));
+    for (let i = 0; i < siteModules.length; i++) {
+      rawResults.push(await runSite(siteModules[i], i));
     }
   }
 
@@ -115,7 +170,8 @@ async function main() {
     await new Promise(r => setTimeout(r, params.pause * 1000));
   }
 
-  await browser.close();
+  if (sharedBrowser) await sharedBrowser.close().catch(() => {});
+  await Promise.all(perSiteBrowsers.map(b => b.close().catch(() => {})));
 
   console.log('\nWriting results...');
   const resultsPath = writeResults({ params, results: allResults, date: today });
@@ -127,7 +183,9 @@ async function main() {
   console.log('\nDone.\n');
 }
 
-main().catch(err => {
-  console.error('Fatal error:', err.message);
-  process.exit(1);
-});
+main()
+  .then(() => process.exit(0))
+  .catch(err => {
+    console.error('Fatal error:', err.message);
+    process.exit(1);
+  });

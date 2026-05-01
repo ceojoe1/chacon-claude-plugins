@@ -34,50 +34,55 @@ async function search(context, params) {
     await humanDelay(1500, 2000);
     console.log(`      [GH] after destination: ${page.url().substring(0, 120)}`);
 
-    // --- Set dates via [data-iso="YYYY-MM-DD"] calendar cells ---
-    // On results page, click the Check-in field to open the calendar.
-    const checkInField = page.locator('[data-label="Check-in"], [aria-label*="Check-in"]').first();
-    const checkInVisible = await checkInField.isVisible({ timeout: 3000 }).catch(() => false);
-    console.log(`      [GH] check-in visible: ${checkInVisible}`);
-    if (checkInVisible) {
-      await checkInField.click();
-      await humanDelay(800, 1200);
-    }
-
-    const hasDataIso = await page.locator('[data-iso]').count().catch(() => 0);
-    console.log(`      [GH] data-iso count after check-in click: ${hasDataIso}`);
-
-    const clickCalendarDate = async (isoDate) => {
-      for (let attempt = 0; attempt < 15; attempt++) {
-        const dayEl = page.locator(`[data-iso="${isoDate}"]`).first();
-        if (await dayEl.isVisible({ timeout: 600 }).catch(() => false)) {
-          await dayEl.click();
-          await humanDelay(400, 600);
-          return true;
-        }
-        const nextBtn = page.locator('[aria-label="Next"]').first();
-        if (!await nextBtn.isVisible({ timeout: 1000 }).catch(() => false)) break;
-        await nextBtn.click();
-        await humanDelay(500, 700);
-      }
-      return false;
+    // --- Set dates by typing into the Check-in / Check-out inputs ---
+    // The [data-iso] calendar cells carry a Google jsaction "clickonly" handler
+    // that silently ignores Playwright/JS-dispatched clicks (likely an
+    // isTrusted/coordinate check in Google's event delegate). Real coordinate
+    // clicks work, but they're brittle in headless. The inputs themselves are
+    // not readOnly and accept MM/DD/YYYY typed values + Tab to commit.
+    const toMDY = (iso) => {
+      const [y, m, d] = iso.split('-');
+      return `${m}/${d}/${y}`;
     };
 
-    const departSet = await clickCalendarDate(params.depart);
-    console.log(`      [GH] depart set: ${departSet}`);
-    const returnSet = await clickCalendarDate(params.return);
-    console.log(`      [GH] return set: ${returnSet}`);
+    const checkInInput = page.locator('input[aria-label="Check-in"]').first();
+    const checkOutInput = page.locator('input[aria-label="Check-out"]').first();
 
-    // Click Done to close calendar
+    const checkInVisible = await checkInInput.isVisible({ timeout: 3000 }).catch(() => false);
+    console.log(`      [GH] check-in input visible: ${checkInVisible}`);
+    if (!checkInVisible) {
+      return { site: SITE, error: 'Check-in input not found' };
+    }
+
+    // Focus the field, select all existing text via keyboard, then type. We
+    // avoid .click() because the calendar popover's Material ripple overlay
+    // intercepts pointer events headlessly. .focus() works without any click.
+    const typeDate = async (input, iso, label) => {
+      await input.focus();
+      await humanDelay(200, 400);
+      await page.keyboard.press('Control+a');
+      await page.keyboard.press('Delete');
+      await page.keyboard.type(toMDY(iso), { delay: 50 });
+      await page.keyboard.press('Tab');
+      await humanDelay(600, 900);
+      const v = await input.inputValue({ timeout: 1000 }).catch(() => '');
+      console.log(`      [GH] ${label} field reads: "${v}"`);
+      return v;
+    };
+
+    await typeDate(checkInInput, params.depart, 'check-in');
+    await typeDate(checkOutInput, params.return, 'check-out');
+
+    // Close calendar if Done is visible (Tab usually closes it, but be safe).
     const doneBtn = page.locator('button').filter({ hasText: /^Done$/ }).last();
-    if (await doneBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
+    if (await doneBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
       await doneBtn.click();
-      await humanDelay(400, 600);
+      await humanDelay(600, 900);
     }
 
     // --- Set guests ---
-    // Use page.evaluate() to bypass pointer event interception from overlapping elements
-    if (params.travelers > 2) {
+    // Google Hotels defaults to 2 adults, so adjust either direction.
+    if (params.travelers !== 2) {
       const opened = await page.evaluate(() => {
         const btn = Array.from(document.querySelectorAll('[role="button"]'))
           .find(el => el.getAttribute('aria-label')?.toLowerCase().includes('traveler'));
@@ -87,16 +92,16 @@ async function search(context, params) {
       console.log(`      [GH] travelers picker opened: ${opened}`);
       if (opened) {
         await humanDelay(600, 900);
-        // Add adults (default is 2, add travelers-2 more)
-        const addAdultBtn = page.locator('[aria-label="Add adult"]').first();
-        if (await addAdultBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
-          for (let i = 2; i < params.travelers; i++) {
-            await addAdultBtn.click();
+        const delta = params.travelers - 2;
+        const btnLabel = delta > 0 ? 'Add adult' : 'Remove adult';
+        const adjustBtn = page.locator(`[aria-label="${btnLabel}"]`).first();
+        if (await adjustBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
+          for (let i = 0; i < Math.abs(delta); i++) {
+            await adjustBtn.click();
             await humanDelay(200, 300);
           }
         }
         await humanDelay(400, 600);
-        // Close picker with Done
         const pickerDone = page.locator('button').filter({ hasText: /^Done$/ }).last();
         if (await pickerDone.isVisible({ timeout: 1000 }).catch(() => false)) {
           await pickerDone.click();

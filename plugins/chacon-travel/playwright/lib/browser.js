@@ -9,12 +9,19 @@ chromium.use(StealthPlugin());
  * @param {object} options
  * @param {boolean} options.headed - Show the browser window (default: false)
  */
-export async function launchBrowser({ headed = false } = {}) {
+export async function launchBrowser({ headed = false, window = null } = {}) {
   const args = [
     '--no-sandbox',
     '--disable-blink-features=AutomationControlled',
     '--disable-dev-shm-usage',
   ];
+
+  // Tile: window={x,y,width,height} positions/sizes the browser window for
+  // headed parallel runs (e.g., 3 sites side-by-side at ~33% screen width).
+  if (window) {
+    args.push(`--window-position=${window.x},${window.y}`);
+    args.push(`--window-size=${window.width},${window.height}`);
+  }
 
   // Try system Chrome first — real Chrome fingerprint avoids many bot checks
   try {
@@ -35,12 +42,12 @@ export async function launchBrowser({ headed = false } = {}) {
 /**
  * Creates a new browser context with realistic browser fingerprint.
  */
-export async function newStealthContext(browser) {
+export async function newStealthContext(browser, viewport = { width: 1440, height: 900 }) {
   const ctx = await browser.newContext({
     userAgent:
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
       '(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-    viewport: { width: 1440, height: 900 },
+    viewport,
     locale: 'en-US',
     timezoneId: 'America/Chicago',
     extraHTTPHeaders: {

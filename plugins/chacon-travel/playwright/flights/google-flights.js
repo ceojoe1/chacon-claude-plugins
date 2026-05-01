@@ -1,204 +1,226 @@
-import { humanDelay, detectCaptcha, selectAutocomplete, inferFareIncludes } from '../sites/helpers.js';
+import { humanDelay, detectCaptcha, inferFareIncludes, extractIATA } from '../sites/helpers.js';
+import { bagFeesForTrip } from '../lib/bag-fees.js';
 
 const SITE = 'Google Flights';
-const URL = 'https://www.google.com/travel/flights';
+
+// Google Flights accepts a free-form ?q= search; e.g.
+//   "Flights to OAK from ABQ on 2026-06-14 through 2026-06-18"
+// This bypasses all of the form-fill brittleness on the homepage.
+function buildUrl(params) {
+  const orig = extractIATA(params.origin) || params.origin;
+  const dest = extractIATA(params.destination) || params.destination;
+  const q = `Flights to ${dest} from ${orig} on ${params.depart} through ${params.return}`;
+  return `https://www.google.com/travel/flights?q=${encodeURIComponent(q)}`;
+}
+
+// Each result card text looks like (single line, whitespace collapsed):
+//   "7:40 AM – 9:10 AM Southwest 2 hr 30 min ABQ–OAK Nonstop 129 kg CO2e ... $429 round trip"
+// or with overnight:
+//   "8:10 PM – 12:15 AM+1 Southwest 5 hr 5 min ABQ–OAK 1 stop 1 hr 40 min SAN ... $439 round trip"
+//
+// For return cards in the "Top returning flights" panel, the same shape applies
+// but the price is the *combined* round-trip price for departing + this return.
+function parseCard(text) {
+  const timeM = text.match(/(\d{1,2}:\d{2}\s*[AP]M)\s*[–\-]\s*(\d{1,2}:\d{2}\s*[AP]M)(\+\d+)?/i);
+  if (!timeM) return null;
+
+  const priceM = text.match(/\$([\d,]+)\s*round trip/i);
+  // Return cards may not include "round trip" suffix in some layouts — fall back
+  // to the first $NNN in the card.
+  const fallbackPriceM = priceM || text.match(/\$([\d,]+)/);
+  if (!fallbackPriceM) return null;
+  const price = parseFloat(fallbackPriceM[1].replace(/,/g, ''));
+
+  // Airline appears immediately after the time range. We boundary on either
+  //   - "Operated by ..." (with or without preceding space, e.g. "DeltaOperated by")
+  //   - the leg duration ("4 hr 23 min")
+  //   - the airport pair ("ABQ-SFO")
+  // and strip a leading "Separate tickets" badge that appears on return cards.
+  const afterTime = text.slice(text.indexOf(timeM[0]) + timeM[0].length).trim();
+  const cleanedAfter = afterTime.replace(/^Separate tickets[\s·•:.\-]*/i, '');
+  // Try a known-airline list first — most reliable.
+  const knownAirline = cleanedAfter.match(/^(United(?:\s+Airlines)?|Southwest(?:\s+Airlines)?|American(?:\s+Airlines)?|Delta(?:\s+Air\s+Lines)?|JetBlue(?:\s+Airways)?|Alaska(?:\s+Airlines)?|Spirit(?:\s+Airlines)?|Frontier(?:\s+Airlines)?|Hawaiian(?:\s+Airlines)?|Allegiant(?:\s+Air)?)/i);
+  let airline;
+  if (knownAirline) {
+    airline = knownAirline[1].replace(/\s+/g, ' ').trim();
+  } else {
+    const airlineRaw = cleanedAfter.match(/^([A-Za-z][A-Za-z\s]+?)(?=Operated by|\s+\d+\s+hr|\s+[A-Z]{3}[–\-])/i)?.[1] || 'Unknown';
+    airline = airlineRaw.trim();
+  }
+
+  const durM = text.match(/(\d+\s*hr(?:\s*\d+\s*min)?)\s+[A-Z]{3}[–\-][A-Z]{3}/i);
+  const duration = durM ? durM[1].replace(/\s+/g, ' ') : null;
+
+  const stopsM = text.match(/Nonstop|\d+\s+stop/i);
+  const stops = stopsM ? stopsM[0] : '—';
+
+  const timeRange = `${timeM[1]} – ${timeM[2]}${timeM[3] || ''}` + (duration ? ` (${duration})` : '');
+  return { airline, timeRange, stops, price };
+}
+
+// After clicking a departing card, Google routes to the "Choose return" view.
+// Wait for the "Top returning flights" heading, then scrape ONLY the cards
+// under that section. The page also keeps the originally-clicked departing
+// flight visible at the top, which uses the same li.pIav2d selector — we'd
+// pick it up as a "return" otherwise (the bug we're fixing here).
+async function scrapeReturnPanel(page) {
+  // Wait for any "returning flights" / "return flights" heading. Some return
+  // views (e.g. American Eagle) use slightly different copy.
+  await page.locator('text=/return(ing)? flights/i').first()
+    .waitFor({ timeout: 15_000 })
+    .catch(() => {});
+  await humanDelay(500, 800);
+
+  const cardTexts = await page.evaluate(() => {
+    const headings = Array.from(document.querySelectorAll('h3, h2'));
+    const heading = headings.find(h =>
+      /(top\s+)?return(ing)?\s+flights?/i.test(h.innerText)
+      || /choose\s+return/i.test(h.innerText)
+    );
+    let section = heading?.parentElement;
+    while (section && !section.querySelector('li.pIav2d')) {
+      section = section?.parentElement;
+    }
+    // Fallback: if no heading found, scope to li.pIav2d cards on the page
+    // EXCEPT the first one (which echoes the just-clicked departing card).
+    if (!section) {
+      const all = Array.from(document.querySelectorAll('li.pIav2d'));
+      return all.slice(1).map(el => el.innerText.replace(/\s+/g, ' ').trim());
+    }
+    return Array.from(section.querySelectorAll('li.pIav2d'))
+      .map(el => el.innerText.replace(/\s+/g, ' ').trim());
+  }).catch(() => []);
+
+  return cardTexts;
+}
 
 async function search(context, params) {
   const page = await context.newPage();
   try {
-    await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    await humanDelay(1500, 2000);
+    const searchUrl = buildUrl(params);
+    await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
 
-    const _cap = await detectCaptcha(page); if (_cap) {
-      return { site: SITE, error: 'CAPTCHA: ' + _cap };
-    }
+    // Wait for the departing result list to render — no artificial pre-delay.
+    await page.locator('li.pIav2d').first().waitFor({ timeout: 20_000 }).catch(() => {});
+    // Short settle so all cards finish painting.
+    await humanDelay(500, 800);
 
-    // --- Set passenger count ---
-    if (params.travelers > 1) {
-      await page.waitForSelector('[aria-label*="passenger"]', { timeout: 5000 }).catch(() => null);
-      const passengerBtn = page.locator('[aria-label*="passenger"]').first();
-      await passengerBtn.click({ timeout: 5000 }).catch(() => null);
-      await humanDelay(600, 900);
+    const cap = await detectCaptcha(page);
+    if (cap) return { site: SITE, error: 'CAPTCHA: ' + cap };
 
-      const addAdultBtn = page.locator('[aria-label="Add adult"]');
-      await addAdultBtn.waitFor({ state: 'visible', timeout: 3000 }).catch(() => null);
-      for (let i = 1; i < params.travelers; i++) {
-        await addAdultBtn.click();
-        await humanDelay(250, 400);
+    // Scope to cards under the "Top departing flights" heading only — the
+    // page also renders "Other departing flights" with the same li.pIav2d
+    // selector, and we don't want to click into all of those.
+    const departingTexts = await page.evaluate(() => {
+      const headings = Array.from(document.querySelectorAll('h3, h2'));
+      const topHeading = headings.find(h => /Top departing flights/i.test(h.innerText));
+      if (!topHeading) {
+        // Fallback: take the first list of pIav2d cards on the page.
+        const list = document.querySelector('ul');
+        if (!list) return [];
+        return Array.from(list.querySelectorAll('li.pIav2d'))
+          .map(el => el.innerText.replace(/\s+/g, ' ').trim());
       }
-
-      const doneBtn = page.locator('[aria-label="Done"]').first();
-      if (await doneBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
-        await doneBtn.click();
-      } else {
-        await page.locator('button').filter({ hasText: /^Done$/ }).first().click({ timeout: 2000 }).catch(() => null);
+      // Walk up to the section that contains both the heading and the card list.
+      let section = topHeading.parentElement;
+      while (section && !section.querySelector('li.pIav2d')) {
+        section = section.parentElement;
       }
-      await humanDelay(500, 700);
+      if (!section) return [];
+      return Array.from(section.querySelectorAll('li.pIav2d'))
+        .map(el => el.innerText.replace(/\s+/g, ' ').trim());
+    }).catch(() => []);
+
+    if (departingTexts.length === 0) {
+      return { site: SITE, error: 'No flight cards found in "Top departing flights" section' };
     }
 
-    // --- Set origin ---
-    // Clicking "Where from?" opens a dialog; after autocomplete, Tab moves focus to "Where to?"
-    if (params.origin) {
-      const originField = page.locator('[aria-label="Where from?"]').first();
-      await originField.click();
-      await humanDelay(500, 700);
-      // Clear existing text and type origin
-      await page.keyboard.press('Control+a');
-      await humanDelay(150, 250);
-      await page.keyboard.type(params.origin, { delay: 80 });
-      await selectAutocomplete(page);
-      await humanDelay(600, 900);
-      // Press Escape to close any remaining dialog overlay
-      await page.keyboard.press('Escape');
-      await humanDelay(400, 600);
-    }
-
-    // --- Set destination ---
-    // Wait for destination field to be clickable; fall back to Tab+type if not
-    const destField = page.locator('[placeholder="Where to?"]').first();
-    const destVisible = await destField.isVisible({ timeout: 3000 }).catch(() => false);
-    if (destVisible) {
-      await destField.click();
-    } else {
-      // Tab from origin field into the "Where to?" field
-      await page.keyboard.press('Tab');
-    }
-    await humanDelay(400, 600);
-    await page.keyboard.type(params.destination, { delay: 80 });
-    await selectAutocomplete(page);
-    await humanDelay(600, 900);
-
-    // --- Set dates via calendar ---
-    // Google Flights calendar day cells use [data-iso="YYYY-MM-DD"].
-    // Navigation: [aria-label="Next"] button.
-
-    const departField = page.locator('[aria-label="Departure"]').first();
-    await departField.click();
-    await humanDelay(800, 1200);
-
-    const clickCalendarDate = async (isoDate) => {
-      for (let attempt = 0; attempt < 15; attempt++) {
-        const dayEl = page.locator(`[data-iso="${isoDate}"]`).first();
-        if (await dayEl.isVisible({ timeout: 600 }).catch(() => false)) {
-          await dayEl.click();
-          await humanDelay(400, 600);
-          return true;
-        }
-        const nextBtn = page.locator('[aria-label="Next"]').first();
-        if (!await nextBtn.isVisible({ timeout: 1000 }).catch(() => false)) break;
-        await nextBtn.click();
-        await humanDelay(500, 700);
-      }
-      return false;
-    };
-
-    const departSet = await clickCalendarDate(params.depart);
-    console.log(`      [GF] depart set: ${departSet}`);
-    const returnSet = await clickCalendarDate(params.return);
-    console.log(`      [GF] return set: ${returnSet}`);
-
-    // Click Done to close calendar
-    const calDoneBtn = page.locator('button').filter({ hasText: /^Done$/ }).last();
-    if (await calDoneBtn.isVisible({ timeout: 1500 }).catch(() => false)) {
-      await calDoneBtn.click();
-      await humanDelay(400, 600);
-    }
-
-    // --- Search ---
-    const searchBtn = page.locator('[aria-label="Search"]').first();
-    await searchBtn.click({ force: true, timeout: 10_000 });
-    const navigated = await page.waitForURL(/travel\/flights\/search/, { timeout: 15_000 }).then(() => true).catch(() => false);
-    if (!navigated) {
-      await page.keyboard.press('Enter');
-      await page.waitForURL(/travel\/flights\/search/, { timeout: 15_000 }).catch(() => null);
-    }
-    await page.waitForLoadState('networkidle', { timeout: 20_000 });
-    // Extra wait for JS-rendered flight results
-    await humanDelay(3000, 4000);
-    console.log(`      [GF] URL: ${page.url().substring(0, 150)}`);
-
-    const _cap2 = await detectCaptcha(page); if (_cap2) {
-      return { site: SITE, error: 'CAPTCHA: ' + _cap2 };
-    }
-
-    // --- Verify traveler count from results page ---
-    const passengerLabel = await page.locator('[aria-label*="change number of passengers"]').first()
-      .getAttribute('aria-label', { timeout: 2000 }).catch(() => '');
-    const confirmedTravelers = parseInt(passengerLabel?.match(/^(\d+)\s+passenger/)?.[1] || '0');
-    if (confirmedTravelers > 0 && confirmedTravelers !== params.travelers) {
-      return { site: SITE, error: `Traveler count mismatch: searched ${params.travelers} but page shows ${confirmedTravelers}` };
-    }
-
-    // --- Wait for results to render ---
-    // Google Flights results render async after networkidle — wait for a price to appear
-    await page.waitForFunction(() => {
-      const body = document.body.innerText || '';
-      return body.includes('Nonstop') || body.includes('1 stop') || body.includes('nonstop');
-    }, { timeout: 15_000 }).catch(() => null);
-
-    // --- Extract results ---
-    const bodyText = await page.evaluate(() => document.body.innerText).catch(() => '');
-
-    // Find price elements — match $XXX or $X,XXX format (leaf nodes with just a price)
-    const priceEls = await page.locator('*').filter({ hasText: /^\$[\d,]{2,7}$/ }).all();
-    console.log(`      [GF] price elements found: ${priceEls.length}`);
+    console.log(`  [Google Flights] Found ${departingTexts.length} top departing flight(s) — clicking each`);
 
     const results = [];
+    const seen = new Set();
 
-    // Collect unique card texts by walking up from each price element
-    const seenCards = new Set();
-    for (const el of priceEls) {
-      const cardInfo = await el.evaluate(e => {
-        let p = e;
-        for (let i = 0; i < 8 && p; i++, p = p.parentElement) {
-          if (p.innerText?.match(/\d{1,2}:\d{2}\s*[AP]M/i)) {
-            return p.innerText?.replace(/\s+/g, ' ').trim();
-          }
-        }
-        return null;
-      }).catch(() => null);
+    for (let i = 0; i < departingTexts.length; i++) {
+      const departing = parseCard(departingTexts[i]);
+      if (!departing) continue;
+      if (departing.price < 50 || departing.price > 20_000) continue;
 
-      if (!cardInfo || seenCards.has(cardInfo)) continue;
-      seenCards.add(cardInfo);
-      if (!/\d{1,2}:\d{2}\s*[AP]M/i.test(cardInfo)) continue;
+      // The "Top departing flights" cards are the first N li.pIav2d in DOM
+      // order. Each card has multiple sub-buttons (CO2 info popup, expand
+      // chevron, price), so a generic [role="button"] click hits the wrong
+      // target. Click the time-range text — it sits on the card-level
+      // navigation handler and reliably drills into the return panel.
+      const card = page.locator('li.pIav2d').nth(i);
+      await card.scrollIntoViewIfNeeded().catch(() => {});
+      const timeText = card.locator('text=/\\d{1,2}:\\d{2}\\s*[AP]M\\s*[–\\-]\\s*\\d{1,2}:\\d{2}\\s*[AP]M/i').first();
+      const hasTime = await timeText.count().then(c => c > 0).catch(() => false);
+      if (hasTime) {
+        await timeText.click({ timeout: 10_000 }).catch(() => {});
+      } else {
+        // Fallback: click upper-left of card where time/airline live
+        await card.click({ position: { x: 60, y: 30 }, timeout: 10_000 }).catch(() => {});
+      }
 
-      console.log(`      [GF card] ${JSON.stringify(cardInfo.substring(0, 300))}`);
+      const returnTexts = await scrapeReturnPanel(page);
 
-      // Card format: "H:MM AM – H:MM PM[+1] AIRLINE X hr Y min ROUTE N stop ..."
-      // Airline comes AFTER the time range
-      const airlineMatch = cardInfo.match(
-        /\d{1,2}:\d{2}\s*[AP]M\s*[–\-]\s*\d{1,2}:\d{2}\s*[AP]M(?:\+\d+)?\s+([A-Za-z][A-Za-z\s,&·]+?)(?=\s+\d+\s+hr)/i
-      );
-      const airline = airlineMatch ? airlineMatch[1].trim().replace(/[,·\s]+$/, '') : 'Unknown';
+      // Navigate back to the departing list for the next iteration.
+      // Defer this so we don't navigate after the last card.
+      const goBackAfter = i < departingTexts.length - 1;
 
-      const priceMatch = cardInfo.match(/\$[\d,]+/);
-      const priceRaw = priceMatch ? parseFloat(priceMatch[0].replace(/[^0-9]/g, '')) : null;
-      if (!priceRaw || priceRaw < 50 || priceRaw > 20000) continue;
+      // Take top 2 return options per departing flight. Skip the first if it
+      // duplicates the departing card text (rare but possible during transition).
+      let added = 0;
+      for (const rText of returnTexts) {
+        if (added >= 2) break;
+        const ret = parseCard(rText);
+        if (!ret) continue;
+        if (ret.price < 50 || ret.price > 20_000) continue;
 
-      // Google Flights shows total price for all travelers when N>1
-      const perPersonRaw = params.travelers > 1 ? Math.round(priceRaw / params.travelers) : priceRaw;
-      const totalRaw = params.travelers > 1 ? priceRaw : priceRaw * params.travelers;
+        const dedupKey = `${departing.airline}:${departing.timeRange}:${ret.airline}:${ret.timeRange}:${ret.price}`;
+        if (seen.has(dedupKey)) continue;
+        seen.add(dedupKey);
 
-      const pp = '$' + perPersonRaw.toLocaleString('en-US') + ' RT';
-      const total = '$' + totalRaw.toLocaleString('en-US');
+        // Use the return card's price as the real combined RT price.
+        const baseRtPrice = ret.price;
+        // Bag fees: charge per direction based on each leg's airline.
+        const outFees = bagFeesForTrip(departing.airline, params.travelers);
+        const retFees = bagFeesForTrip(ret.airline, params.travelers);
+        const baseGroup = baseRtPrice * params.travelers;
+        const totalGroup = baseGroup + outFees.outbound + retFees.return;
 
-      const stopsMatch = cardInfo.match(/Nonstop|[0-3] stop/i);
-      const stops = stopsMatch ? stopsMatch[0] : '—';
+        results.push({
+          airline: departing.airline === ret.airline
+            ? departing.airline
+            : `${departing.airline} / ${ret.airline}`,
+          outbound: departing.timeRange,
+          return_: ret.timeRange,
+          stopsOut: departing.stops,
+          stopsRet: ret.stops,
+          stops: `${departing.stops} / ${ret.stops}`,
+          includes: inferFareIncludes(departingTexts[i] + ' ' + rText, departing.airline),
+          baseRtPrice,
+          perPerson: '$' + baseRtPrice.toLocaleString('en-US') + ' RT',
+          bagFees: `$${outFees.outbound} / $${retFees.return}`,
+          total: '$' + totalGroup.toLocaleString('en-US'),
+        });
+        added++;
+      }
 
-      const timesMatch = cardInfo.match(/(\d{1,2}:\d{2}\s*[AP]M\s*[–\-]\s*\d{1,2}:\d{2}\s*[AP]M)/i);
-      const route = timesMatch ? timesMatch[1].trim() : '—';
-
-      if (results.some(r => r.perPerson === pp && r.stops === stops)) continue;
-
-      const includes = inferFareIncludes(cardInfo, airline);
-      results.push({ airline, route, stops, includes, perPerson: pp, total });
-      if (results.length >= 3) break;
+      if (goBackAfter) {
+        // Full reload via the original search URL — page.goBack() is unreliable
+        // on GF's SPA routing: after the first iteration cached cards stop
+        // re-binding click handlers and subsequent clicks yield zero returns.
+        await page.goto(searchUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+        await page.locator('text=/Top departing flights/i').first()
+          .waitFor({ timeout: 15_000 }).catch(() => {});
+        await page.locator('li.pIav2d').first().waitFor({ timeout: 15_000 }).catch(() => {});
+        await humanDelay(500, 800);
+      }
     }
 
     if (results.length === 0) {
-      return { site: SITE, error: 'No results found' };
+      return { site: SITE, error: 'No results parsed from cards — format may have changed' };
     }
-
     return { site: SITE, results };
 
   } catch (err) {

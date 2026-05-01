@@ -1,9 +1,20 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { bagFeesForTrip } from './bag-fees.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const TRAVEL_PLANS_DIR = path.resolve(__dirname, '../../travel_plans');
+
+// Resolve travel_plans/ relative to the working directory the user invoked
+// the script from. This lets users control where output lands by cd-ing to
+// the desired folder before running, which works equally well for the
+// source repo workflow and for /chacon-travel:travel-setup installations.
+//
+// Override with TRAVEL_PLANS_DIR env var if you need a fixed absolute path
+// (e.g. running from a scheduled job whose cwd you don't control).
+const TRAVEL_PLANS_DIR = process.env.TRAVEL_PLANS_DIR
+  ? path.resolve(process.env.TRAVEL_PLANS_DIR)
+  : path.resolve(process.cwd(), 'travel_plans');
 
 /**
  * Returns the current time formatted in the local timezone, e.g.
@@ -36,33 +47,112 @@ function groupBySite(results) {
   return bySite;
 }
 
-/**
- * Builds the results.md content for a flights search.
- * Results are grouped under "#### <Site Name>" subheaders so it's easy to
- * scan per-site, and the redundant per-row Site column is dropped.
- */
-function buildFlightsTable(results) {
-  const sections = [];
-  for (const [site, rows] of groupBySite(results)) {
-    sections.push(`#### ${site}`);
-    sections.push('');
-    if (rows.length === 1 && rows[0].error) {
-      sections.push(`_${rows[0].error}_`);
-      sections.push('');
+// Flat-table column order for flights — used by both Markdown and CSV outputs.
+const FLIGHT_COLUMNS = [
+  'Processed Timestamp',
+  'Origin',
+  'Destination',
+  'Travelers',
+  'Site',
+  'Airline',
+  'Departure Date',
+  'Return Date',
+  'Departure Times',
+  'Return Times',
+  'Stops (out/ret)',
+  'Round Trip Cost',
+  'Extra Costs (out/ret)',
+  'Total Cost',
+  'Amenities',
+];
+
+function flightRow(params, r, timestamp) {
+  const baseRt = r.baseRtPrice || null;
+  const fees = bagFeesForTrip(r.airline, params.travelers);
+  const baseGroup = baseRt != null ? baseRt * params.travelers : null;
+  const totalGroup = baseGroup != null ? baseGroup + fees.total : null;
+  return {
+    'Processed Timestamp': timestamp,
+    Origin: params.origin,
+    Destination: params.destination,
+    Travelers: params.travelers,
+    Site: r.site,
+    Airline: r.airline || '—',
+    'Departure Date': params.depart,
+    'Return Date': params.return,
+    'Departure Times': r.outbound || '—',
+    'Return Times': r.return_ || '—',
+    'Stops (out/ret)': r.stops || `${r.stopsOut || '—'} / ${r.stopsRet || '—'}`,
+    'Round Trip Cost': baseGroup != null ? `$${baseGroup.toLocaleString('en-US')}` : (r.perPerson || '—'),
+    'Extra Costs (out/ret)': r.bagFees || `$${fees.outbound} / $${fees.return}`,
+    'Total Cost': totalGroup != null ? `$${totalGroup.toLocaleString('en-US')}` : (r.total || '—'),
+    Amenities: r.includes || '—',
+  };
+}
+
+function buildFlightsTable(params, results, timestamp) {
+  const lines = [];
+  lines.push('| ' + FLIGHT_COLUMNS.join(' | ') + ' |');
+  lines.push('|' + FLIGHT_COLUMNS.map(() => '---').join('|') + '|');
+
+  // Errors: emit a single row per failed site with the error in the Airline column
+  for (const r of results) {
+    if (r.error) {
+      // Collapse multi-line / pipe-bearing errors so the markdown row stays valid
+      const flatErr = String(r.error).replace(/\s+/g, ' ').replace(/\|/g, '\\|').trim();
+      const errCells = FLIGHT_COLUMNS.map(c => {
+        if (c === 'Processed Timestamp') return timestamp;
+        if (c === 'Site') return r.site || '—';
+        if (c === 'Airline') return `_${flatErr}_`;
+        if (c === 'Origin') return params.origin;
+        if (c === 'Destination') return params.destination;
+        if (c === 'Travelers') return String(params.travelers);
+        if (c === 'Departure Date') return params.depart;
+        if (c === 'Return Date') return params.return;
+        return '—';
+      });
+      lines.push('| ' + errCells.join(' | ') + ' |');
       continue;
     }
-    sections.push('| Airline | Departure → Return | Stops | Includes | Per Person | Total (Group) |');
-    sections.push('|---|---|---|---|---|---|');
-    for (const r of rows) {
-      if (r.error) {
-        sections.push(`| _${r.error}_ | — | — | — | — | — |`);
-      } else {
-        sections.push(`| ${r.airline} | ${r.route} | ${r.stops} | ${r.includes || '—'} | ${r.perPerson} | ${r.total} |`);
-      }
-    }
-    sections.push('');
+    const row = flightRow(params, { ...r, site: r.site }, timestamp);
+    lines.push('| ' + FLIGHT_COLUMNS.map(c => row[c] ?? '—').join(' | ') + ' |');
   }
-  return sections.join('\n').trimEnd();
+  return lines.join('\n');
+}
+
+function csvEscape(v) {
+  const s = v == null ? '' : String(v);
+  if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
+  return s;
+}
+
+function buildFlightsCsv(params, results, timestamp) {
+  const lines = [FLIGHT_COLUMNS.map(csvEscape).join(',')];
+  for (const r of results) {
+    if (r.error) continue;
+    const row = flightRow(params, { ...r, site: r.site }, timestamp);
+    lines.push(FLIGHT_COLUMNS.map(c => csvEscape(row[c])).join(','));
+  }
+  return lines.join('\n') + '\n';
+}
+
+/**
+ * Flatten per-site result groups into per-row entries with site attached.
+ * Some scrapers return { site, results: [...] } while error sites return
+ * { site, error }. Normalize both.
+ */
+function flattenResults(results) {
+  const out = [];
+  for (const grp of results) {
+    if (grp.error) {
+      out.push({ site: grp.site, error: grp.error });
+    } else if (Array.isArray(grp.results)) {
+      for (const row of grp.results) out.push({ ...row, site: grp.site });
+    } else {
+      out.push(grp);
+    }
+  }
+  return out;
 }
 
 /**
@@ -158,8 +248,10 @@ export function writeResults({ params, results, date }) {
   const timestamp = localTimestamp();
 
   let tableContent;
+  let csvContent = null;
   if (params.category === 'flights') {
-    tableContent = buildFlightsTable(results);
+    tableContent = buildFlightsTable(params, results, timestamp);
+    csvContent = buildFlightsCsv(params, results, timestamp);
   } else if (params.category === 'hotels') {
     tableContent = buildHotelsTable(results);
   } else {
@@ -178,8 +270,7 @@ ${tableContent}
   const outDir = path.join(
     TRAVEL_PLANS_DIR,
     params.slug,
-    params.category,
-    `processed=${date}`
+    params.category
   );
   fs.mkdirSync(outDir, { recursive: true });
 
@@ -190,6 +281,21 @@ ${tableContent}
     fs.appendFileSync(outPath, '\n---\n\n' + content, 'utf8');
   } else {
     fs.writeFileSync(outPath, content, 'utf8');
+  }
+
+  // Also emit CSV alongside the .md for spreadsheet viewing. Append rows
+  // (without re-emitting the header) when the CSV already exists for the day.
+  if (csvContent) {
+    const csvPath = path.join(outDir, 'results.csv');
+    if (fs.existsSync(csvPath)) {
+      const lines = csvContent.split('\n');
+      const dataOnly = lines.slice(1).join('\n'); // drop header on append
+      if (dataOnly.trim()) {
+        fs.appendFileSync(csvPath, dataOnly, 'utf8');
+      }
+    } else {
+      fs.writeFileSync(csvPath, csvContent, 'utf8');
+    }
   }
 
   return outPath;

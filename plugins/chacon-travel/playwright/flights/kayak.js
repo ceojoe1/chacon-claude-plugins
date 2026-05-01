@@ -1,34 +1,60 @@
-import { humanDelay, detectCaptcha, waitForCaptchaSolve, inferFareIncludes } from '../sites/helpers.js';
+import { humanDelay, detectCaptcha, waitForCaptchaSolve, inferFareIncludes, extractIATA } from '../sites/helpers.js';
+import { bagFeesForTrip } from '../lib/bag-fees.js';
 
 const SITE = 'Kayak';
 
-// Kayak direct URL: /flights/ABQ-ORL/2026-07-10/2026-07-17/4adults
+// Resolve a 3-letter IATA code from inputs like "San Francisco, CA",
+// "San Francisco, CA (SFO)", or bare "ABQ". Uses the shared city-name
+// lookup table; falls back to the first slug of letters only if all else
+// fails (which is incorrect for full city names like "San Francisco" — that
+// fallback caused us to silently search San Diego (SAN) before).
+function extractCode(str) {
+  const iata = extractIATA(str);
+  if (iata) return iata;
+  // Last-ditch fallback: take the first 3 uppercase letters or the first 3
+  // letters of the slug. This is unreliable; if you hit it, add the city to
+  // the helpers.js CITY_TO_IATA table.
+  const m = str.match(/\b([A-Z]{3})\b/);
+  return m ? m[1] : str.replace(/[^a-zA-Z]/g, '').toUpperCase().slice(0, 3);
+}
+
+// Kayak direct URL with filter chain (per debugging/kayak.md):
+//   sort=price_a              cheapest first
+//   fs=airlines=-AS,flylocal  exclude Alaska, prefer flylocal carriers
+//      providers=-ONLY_DIRECT,AS,B6   exclude direct-only / AS / JetBlue
+//      cabin=-f                no first class
+//      stops=-2                max 1 stop
+//      hidebasic               hide basic economy fares
+// Removed bfc=1 + cfc=1 (require-free-bags) — they filtered nearly everything
+// down to Southwest only. Bag fees are added in the cost calc instead.
 function buildUrl(params) {
-  const extractCode = str => {
-    const match = str.match(/\b([A-Z]{3})\b/);
-    return match ? match[1] : str.replace(/[^a-zA-Z]/g, '').toUpperCase().slice(0, 3);
-  };
   const orig = extractCode(params.origin);
   const dest = extractCode(params.destination) || 'ORL';
-  return `https://www.kayak.com/flights/${orig}-${dest}/${params.depart}/${params.return}/${params.travelers}adults?sort=bestflight_a`;
+  const adults = params.travelers > 1 ? `/${params.travelers}adults` : '';
+  const fs = encodeURIComponent('airlines=-AS,flylocal;providers=-ONLY_DIRECT,AS,B6;cabin=-f;stops=-2;hidebasic=hidebasic');
+  return `https://www.kayak.com/flights/${orig}-${dest}/${params.depart}/${params.return}${adults}?sort=bestflight_a&fs=${fs}`;
 }
 
 async function search(context, params) {
   const page = await context.newPage();
   try {
     await page.goto(buildUrl(params), { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    await humanDelay(3000, 4000); // Kayak loads results asynchronously
+    // No artificial delay — the .waitFor on a real result card below blocks
+    // until results actually render.
 
-    // Wait for an actual flight result card to appear. The class
-    // "Fxw9-result-item-container" wraps each itinerary; we filter to ones
-    // containing both a price AND an airline so we know real results loaded
-    // (not just the filter sidebar / ad placeholders).
-    await page.locator('.Fxw9-result-item-container').filter({
+    // Per debugging/kayak.md, the result list lives at
+    //   #flight-results-list-wrapper > div:nth-child(3) > div.Fxw9 > div
+    // and each itinerary is a direct child div of that container. Wait for
+    // one to render with a price + airline so we know real results (not
+    // skeleton placeholders) have loaded.
+    const RESULT_LIST = '#flight-results-list-wrapper > div:nth-child(3) > div.Fxw9 > div > div';
+    await page.locator(RESULT_LIST).filter({
       hasText: /\$\d{3,4}.*?(United|Southwest|American|Delta|JetBlue|Alaska|Frontier|Spirit)/i,
     }).first().waitFor({ timeout: 30_000 }).catch(() => {});
-    await humanDelay(1000, 2000);
+    // Brief settle so additional cards finish rendering — drops 1-2s.
+    await humanDelay(400, 700);
 
-    const cardCount = await page.locator('.Fxw9-result-item-container').count().catch(() => 0);
+    const cardCount = await page.locator(RESULT_LIST).count().catch(() => 0);
     if (cardCount === 0) {
       const _cap = await detectCaptcha(page);
       if (_cap) {
@@ -43,16 +69,38 @@ async function search(context, params) {
       }
     }
 
-    // Pull text of all top-level result cards in one round trip
-    const cardTexts = await page.locator('.Fxw9-result-item-container').evaluateAll(els =>
-      els.map(el => el.innerText.replace(/\s+/g, ' ').trim()).filter(t => t.length > 50)
-    ).catch(() => []);
+    // The Fxw9 container also includes header tabs (Cheapest/Best/Quickest)
+    // and ad/summary cells as direct children — so we can't trust raw nth-child
+    // ordering. Filter to true flight cards: must contain at least 2 time
+    // pairs (outbound + return), an airline name, and a 3+ digit price. We
+    // also include Kayak's "Go to result details" string as a card marker
+    // (the header tabs and ad cells lack it).
+    const cardTexts = await page.locator(RESULT_LIST).evaluateAll(els => {
+      const timePairRe = /\d{1,2}:\d{2}\s*[ap]m\s*[–\-]\s*\d{1,2}:\d{2}\s*[ap]m/gi;
+      const airlineRe = /United|Southwest|American|Delta|JetBlue|Alaska|Spirit|Frontier|Hawaiian/i;
+      const priceRe = /\$\d{3,}/;
+      const detailMarker = /Go to result details/i;
+      const passed = [];
+      for (const el of els) {
+        const t = el.innerText.replace(/\s+/g, ' ').trim();
+        if (t.length < 50) continue;
+        if (!detailMarker.test(t)) continue;
+        const timeMatches = t.match(timePairRe) || [];
+        if (timeMatches.length < 2) continue;
+        if (!airlineRe.test(t) || !priceRe.test(t)) continue;
+        passed.push(t);
+        if (passed.length >= 5) break;
+      }
+      return passed;
+    }).catch(() => []);
 
     const results = [];
     for (const cardText of cardTexts) {
-      // Skip ad cards ("Book now, pay later", "paid placement") — they lack
-      // proper flight time pairs.
+      // Skip ad / sponsored cards. Kayak marks them with " Ad " (with spaces
+      // around the literal text near the price) or "paid placement"/"Book now,
+      // pay later" in the body.
       if (/paid placement|Book now, pay later/i.test(cardText)) continue;
+      if (/\sAd\s+\$\d/.test(cardText)) continue;
       // Must have at least one departure time pattern + airline + a price
       if (!/\d{1,2}:\d{2}\s*[ap]m/i.test(cardText)) continue;
 
@@ -77,39 +125,61 @@ async function search(context, params) {
         tiers.push({ price: parseFloat(fallback[1]), tierName: '' });
       }
 
-      // Time range — outbound leg
-      const timeMatch = cardText.match(/(\d{1,2}:\d{2}\s*[ap]m)\s*[–\-]\s*(\d{1,2}:\d{2}\s*[ap]m)/i);
-      const route = timeMatch ? `${timeMatch[1]} – ${timeMatch[2]}` : `${params.depart} → ${params.return}`;
-      const stops = cardText.match(/nonstop|\d+\s*stop/i)?.[0] || '—';
-      // Pick the longest "Xh Ym" duration on the card — the first match is
-      // typically a layover ("0h 40m layover"), not the total flight duration.
-      const durMatches = [...cardText.matchAll(/(\d+)h\s*(\d+)m/g)]
-        .map(m => ({ text: m[0], minutes: parseInt(m[1]) * 60 + parseInt(m[2]) }))
-        .filter(d => d.minutes >= 60); // exclude sub-hour layovers
-      durMatches.sort((a, b) => b.minutes - a.minutes);
-      const dur = durMatches[0]?.text || '';
-      const routeFull = dur ? `${route} (${dur})` : route;
+      // Time ranges — Kayak cards show outbound and return as two separate
+      // time pairs in document order. Capture all and assume [0]=outbound,
+      // [1]=return.
+      const timeMatches = [...cardText.matchAll(/(\d{1,2}:\d{2}\s*[ap]m)\s*[–\-]\s*(\d{1,2}:\d{2}\s*[ap]m)/gi)];
+      const stopMatches = [...cardText.matchAll(/nonstop|\d+\s*stop/gi)].map(m => m[0]);
+      // Durations — Kayak cards intermix leg totals ("6h 05m AUS - OAK") with
+      // layover durations ("1h 20m layover, Dallas..."). Exclude any "Xh Ym"
+      // immediately followed by " layover" so we keep only leg totals in
+      // document order. The first two surviving matches are outbound and
+      // return leg totals respectively.
+      const durMatches = [...cardText.matchAll(/(\d+)h\s*(\d+)m(?!\s*layover)/gi)]
+        .map(m => ({ text: m[0], minutes: parseInt(m[1]) * 60 + parseInt(m[2]) }));
 
-      for (const tier of tiers.slice(0, 2)) {
+      const fmtLeg = (timeM, dur) => {
+        if (!timeM) return '—';
+        const base = `${timeM[1]} – ${timeM[2]}`;
+        return dur ? `${base} (${dur})` : base;
+      };
+      const outbound = fmtLeg(timeMatches[0], durMatches[0]?.text);
+      const returnLeg = fmtLeg(timeMatches[1], durMatches[1]?.text);
+      const stopsOut = stopMatches[0] || '—';
+      const stopsRet = stopMatches[1] || stopMatches[0] || '—';
+      const stopsCombined = `${stopsOut} / ${stopsRet}`;
+
+      // Emit only the cheapest tier per card (kayak.md spec: "select all the
+      // available flights (5 max)" — one row per itinerary, not per tier).
+      const cheapestTier = tiers.slice().sort((a, b) => a.price - b.price)[0];
+      for (const tier of [cheapestTier]) {
         if (tier.price < 100 || tier.price > 5000) continue;
-        const dedupKey = `${airline}:${tier.price}:${stops}:${dur}`;
+        const dedupKey = `${airline}:${tier.price}:${stopsCombined}:${outbound}`;
         if (results.some(r => r._key === dedupKey)) continue;
 
         // Build a tier-specific context for inferFareIncludes — Kayak's tier
         // name is more reliable than scanning the whole card text.
         const includesContext = tier.tierName ? `${tier.tierName}` : cardText;
+        const fees = bagFeesForTrip(airline, params.travelers);
+        const baseGroup = tier.price * params.travelers;
+        const totalGroup = baseGroup + fees.total;
         results.push({
           _key: dedupKey,
           airline,
-          route: routeFull,
-          stops,
+          outbound,
+          return_: returnLeg,
+          stopsOut,
+          stopsRet,
+          stops: stopsCombined,
           includes: inferFareIncludes(includesContext, airline),
+          baseRtPrice: tier.price,
           perPerson: '$' + tier.price.toLocaleString('en-US') + ' RT',
-          total: '$' + (tier.price * params.travelers).toLocaleString('en-US'),
+          bagFees: `$${fees.outbound} / $${fees.return}`,
+          total: '$' + totalGroup.toLocaleString('en-US'),
         });
       }
 
-      if (results.length >= 4) break;
+      if (results.length >= 5) break;
     }
 
     if (results.length === 0) {

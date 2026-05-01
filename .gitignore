@@ -2,3 +2,4 @@ travel_plans/
 playwright/node_modules/
 *.log
 todo.md
+debugging/
