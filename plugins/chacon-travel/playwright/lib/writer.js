@@ -1,20 +1,9 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
 import { bagFeesForTrip } from './bag-fees.js';
+import { DATA_DIR } from './data-dir.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-// Resolve travel_plans/ relative to the working directory the user invoked
-// the script from. This lets users control where output lands by cd-ing to
-// the desired folder before running, which works equally well for the
-// source repo workflow and for /chacon-travel:travel-setup installations.
-//
-// Override with TRAVEL_PLANS_DIR env var if you need a fixed absolute path
-// (e.g. running from a scheduled job whose cwd you don't control).
-const TRAVEL_PLANS_DIR = process.env.TRAVEL_PLANS_DIR
-  ? path.resolve(process.env.TRAVEL_PLANS_DIR)
-  : path.resolve(process.cwd(), 'travel_plans');
+const TRAVEL_PLANS_DIR = DATA_DIR;
 
 /**
  * Returns the current time formatted in the local timezone, e.g.

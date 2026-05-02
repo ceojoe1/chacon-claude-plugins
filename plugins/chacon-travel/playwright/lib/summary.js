@@ -1,9 +1,8 @@
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { DATA_DIR } from './data-dir.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const TRAVEL_PLANS_DIR = path.resolve(__dirname, '../../travel_plans');
+const TRAVEL_PLANS_DIR = DATA_DIR;
 
 function categoryLabel(category) {
   if (category === 'flights') return 'Flights';

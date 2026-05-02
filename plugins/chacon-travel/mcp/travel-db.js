@@ -4,7 +4,12 @@ const path = require('node:path');
 const fs = require('node:fs');
 const readline = require('node:readline');
 
-const DB_PATH = path.resolve(__dirname, '../travel_plans/vacai.db');
+// Default: <plugin-root>/data/vacai.db. Honors CHACON_TRAVEL_DATA_DIR /
+// TRAVEL_PLANS_DIR env var so this matches the writer's resolution exactly.
+const DATA_DIR_ENV = process.env.CHACON_TRAVEL_DATA_DIR || process.env.TRAVEL_PLANS_DIR;
+const DB_PATH = DATA_DIR_ENV
+  ? path.resolve(DATA_DIR_ENV, 'vacai.db')
+  : path.resolve(__dirname, '../data/vacai.db');
 
 let _db = null;
 

@@ -1,4 +1,6 @@
 travel_plans/
+plugins/chacon-travel/data/
+plugins/chacon-travel/playwright/node_modules/
 playwright/node_modules/
 *.log
 todo.md
