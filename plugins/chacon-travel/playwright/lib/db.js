@@ -78,9 +78,9 @@ export function upsertTrip(params) {
  * delete any prior child results so the new run replaces them. Returns the
  * search id.
  */
-export function upsertSearchSnapshot({ tripId, category, sites, tripLabel }) {
+export function upsertSearchSnapshot({ tripId, category, sites, tripLabel, snapshotDate: overrideDate }) {
   const db = openDb();
-  const snapshotDate = new Date().toISOString().slice(0, 10);
+  const snapshotDate = overrideDate || new Date().toISOString().slice(0, 10);
 
   const existing = db.prepare(`
     SELECT id FROM searches
