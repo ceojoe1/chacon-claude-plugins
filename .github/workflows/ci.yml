@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+# Pin actions to commit SHAs for supply-chain safety. The trailing comment
+# documents the released tag at the time of pinning so future bumps can be
+# audited. Use `pin-github-action` (or Dependabot github-actions ecosystem)
+# to update.
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Syntax + manifest checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4.1.7
+
+      - name: Set up Node.js
+        uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
+        with:
+          node-version: '22.5'
+          cache: npm
+          cache-dependency-path: plugins/chacon-travel/playwright/package-lock.json
+
+      - name: Install playwright runtime deps
+        working-directory: plugins/chacon-travel/playwright
+        run: npm ci --ignore-scripts
+
+      - name: Validate JSON manifests
+        run: |
+          node -e "JSON.parse(require('fs').readFileSync('.claude-plugin/marketplace.json','utf8'))"
+          node -e "JSON.parse(require('fs').readFileSync('plugins/chacon-travel/.claude-plugin/plugin.json','utf8'))"
+
+      - name: Verify plugin.json and marketplace.json versions match
+        run: |
+          PLUGIN_V=$(node -p "require('./plugins/chacon-travel/.claude-plugin/plugin.json').version")
+          MARKET_V=$(node -p "require('./.claude-plugin/marketplace.json').plugins[0].version")
+          if [ "$PLUGIN_V" != "$MARKET_V" ]; then
+            echo "Version mismatch: plugin.json=$PLUGIN_V, marketplace.json=$MARKET_V"
+            exit 1
+          fi
+          echo "Version: $PLUGIN_V"
+
+      - name: Syntax-check JS entry points
+        run: |
+          node --check plugins/chacon-travel/playwright/search.js
+          node --check plugins/chacon-travel/playwright/trip.js
+          node --check plugins/chacon-travel/playwright/import.js
+          node --check plugins/chacon-travel/mcp/travel-db.js
+
+      - name: Verify CLI loads
+        working-directory: plugins/chacon-travel/playwright
+        run: |
+          node --no-warnings ./trip.js list || true
+          node --no-warnings ./search.js 2>&1 | grep -q "category must be one of" && echo "search.js usage shown"

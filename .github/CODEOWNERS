@@ -1,0 +1,12 @@
+# Default owner for everything in this repo.
+* @ceojoe1
+
+# Schema and DB layer — sensitive surface, double-check changes.
+/plugins/chacon-travel/mcp/schema.sql      @ceojoe1
+/plugins/chacon-travel/playwright/lib/db.js @ceojoe1
+
+# Security and release infrastructure.
+/SECURITY.md           @ceojoe1
+/.github/              @ceojoe1
+/scripts/              @ceojoe1
+/.claude-plugin/       @ceojoe1
