@@ -20,7 +20,7 @@ function shortLink(url) {
   let display = url;
   try {
     const u = new URL(url);
-    if (u.hostname.endsWith('google.com')) {
+    if (u.hostname === 'google.com' || u.hostname.endsWith('.google.com')) {
       const dest = u.searchParams.get('pcurl') || u.searchParams.get('adurl');
       if (dest) {
         try { display = new URL(decodeURIComponent(dest)).hostname.replace(/^www\./, ''); } catch {}
