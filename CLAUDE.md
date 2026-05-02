@@ -63,7 +63,6 @@ Things to circle back to in future sessions (kept here so context survives `/cle
 
 - **Fix Southwest flight-row rendering** — the southwest.com scraper hits an XHR-level bot block; flight rows never render. Needs a different approach (Chrome MCP with a real session, or the southwest mobile API).
 - **Refactor Expedia (blocked by Akamai)** — partial refactor exists in `flights/expedia.js` (filtered URL, modal tier-pick flow, returning-page scrape) but Akamai's "Access Denied" hits fresh sessions. Needs stronger stealth or a real-Chrome path.
-- **Validate bag fees for AA/JetBlue/Alaska/Spirit/Frontier** — `lib/bag-fees.js` defaults to $40 for everything except Southwest ($35), Delta ($45), United ($50). Numbers for the rest should be verified.
 
 ## Working Defaults
 
