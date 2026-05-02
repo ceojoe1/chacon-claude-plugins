@@ -13,6 +13,8 @@ All notable changes to chacon-claude-plugins are documented here. The format fol
 - MCP `get_price_history` for hotels renders Source Link as a short clickable markdown link (`[booking.com](full-url)`) instead of the raw 200-char Google redirect URL.
 
 ### Changed
+- **Google Hotels: use the SERP card's headline price (`$X nightly / $Y total`) as the canonical row price** instead of parsing the cheapest tier from the detail page. The detail-page approach was returning implausibly low single-room rates that didn't match what users saw on Google. Detail-page navigation is still done (for address/distance + cheapest vendor name) but only one row per hotel is now emitted.
+- **Google Hotels Source Link points to the Google Hotels detail page** instead of the booking-site redirect URL. Users can re-verify the price in one click.
 - Default per-site timeout bumped 300s → 600s. The 8-hotels × 6-sites parallel run was hitting the previous limit before partial-results could be returned.
 - Google Hotels SERP filter now excludes vacation rentals / apartments / condos / villas — they use a different DOM with no triple-dollar pattern and burn drilldown budget on 0 results.
 - Hotels registry trimmed to the working scrapers: Google Hotels, Kayak, Airbnb. Expedia, Costco Travel, and VRBO are commented out pending fixes (tracked in CLAUDE.md backlog).
