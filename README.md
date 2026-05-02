@@ -22,12 +22,7 @@ After installing, the following skills are available:
 
 ### Playwright runtime (required)
 
-The skills run headless browser searches via Playwright. After installing the plugin, install the runtime:
-
-```bash
-cp -r ~/.claude/plugins/cache/chacon-marketplace/chacon-travel/*/playwright ./playwright
-cd playwright && npm install
-```
+The skills run headless browser searches via Playwright. After installing the plugin, run `/chacon-travel:travel-setup` once — it installs Playwright dependencies inside the plugin directory and registers the travel DB MCP server. The runtime stays inside the plugin install location; nothing is copied into your project.
 
 ### Chrome MCP fallback (recommended)
 

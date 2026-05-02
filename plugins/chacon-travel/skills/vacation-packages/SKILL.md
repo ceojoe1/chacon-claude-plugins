@@ -37,7 +37,7 @@ Use the selected experiences to:
 Use the Bash tool to run:
 
 ```
-node playwright/search.js vacation-packages --origin "<ORIGIN>" --destination "<DESTINATION>" --depart <YYYY-MM-DD> --return <YYYY-MM-DD> --travelers <N>
+node "${CLAUDE_PLUGIN_ROOT}/playwright/search.js" vacation-packages --origin "<ORIGIN>" --destination "<DESTINATION>" --depart <YYYY-MM-DD> --return <YYYY-MM-DD> --travelers <N>
 ```
 
 This writes results to `travel_plans/[destination-slug]/vacation_packages/processed=[YYYY-MM-DD]/results.md` and updates `summary.md` automatically. Wait for the command to complete.

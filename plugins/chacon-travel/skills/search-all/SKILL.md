@@ -35,7 +35,7 @@ Spawn all three Playwright searches **simultaneously** using the Agent tool with
 Run ONLY the Playwright headless step for the /flights skill. Do NOT use Chrome MCP. Do not ask questions.
 
 Run:
-  node playwright/search.js flights --origin "[origin]" --destination "[destination]" --depart [depart] --return [return] --travelers [travelers]
+  node "${CLAUDE_PLUGIN_ROOT}/playwright/search.js" flights --origin "[origin]" --destination "[destination]" --depart [depart] --return [return] --travelers [travelers]
 
 Wait for it to complete, then report back: which sites succeeded, which returned N/A, and the path to results.md.
 ```
@@ -45,7 +45,7 @@ Wait for it to complete, then report back: which sites succeeded, which returned
 Run ONLY the Playwright headless step for the /hotels skill. Do NOT use Chrome MCP. Do not ask questions.
 
 Run:
-  node playwright/search.js hotels --destination "[destination]" --depart [depart] --return [return] --travelers [travelers] --rooms [rooms]
+  node "${CLAUDE_PLUGIN_ROOT}/playwright/search.js" hotels --destination "[destination]" --depart [depart] --return [return] --travelers [travelers] --rooms [rooms]
 
 Wait for it to complete, then report back: which sites succeeded, which returned N/A, and the path to results.md.
 ```
@@ -55,7 +55,7 @@ Wait for it to complete, then report back: which sites succeeded, which returned
 Run ONLY the Playwright headless step for the /vacation-packages skill. Do NOT use Chrome MCP. Do not ask questions.
 
 Run:
-  node playwright/search.js vacation-packages --origin "[origin]" --destination "[destination]" --depart [depart] --return [return] --travelers [travelers]
+  node "${CLAUDE_PLUGIN_ROOT}/playwright/search.js" vacation-packages --origin "[origin]" --destination "[destination]" --depart [depart] --return [return] --travelers [travelers]
 
 Wait for it to complete, then report back: which sites succeeded, which returned N/A, and the path to results.md.
 ```
