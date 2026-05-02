@@ -16,7 +16,7 @@ cd chacon-claude-plugins/plugins/chacon-travel/playwright
 npm install
 ```
 
-You'll need **Node.js 22.5 or newer** (the plugin uses the built-in `node:sqlite` API).
+You'll need **Node.js 24 or newer** (the plugin uses the built-in `node:sqlite` API, which was unflagged in Node 24).
 
 To test a search end-to-end:
 
