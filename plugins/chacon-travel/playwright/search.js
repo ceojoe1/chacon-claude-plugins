@@ -7,19 +7,24 @@ import { closeDb } from './lib/db.js';
 const SITE_REGISTRY = {
   flights: [
     () => import('./flights/google-flights.js'),
-    () => import('./flights/southwest.js'),
-    () => import('./flights/expedia.js'),
-    () => import('./flights/orbitz.js'),
     () => import('./flights/kayak.js'),
     () => import('./flights/united.js'),
+    // Disabled — see backlog "Scraper improvements" in CLAUDE.md.
+    // southwest: XHR-level bot block; expedia: Akamai;
+    // orbitz: DataDome (Expedia Group shares fraud detection across brands).
+    // () => import('./flights/southwest.js'),
+    // () => import('./flights/expedia.js'),
+    // () => import('./flights/orbitz.js'),
   ],
   hotels: [
     () => import('./hotels/google-hotels.js'),
-    () => import('./hotels/expedia.js'),
     () => import('./hotels/kayak.js'),
-    () => import('./hotels/costco-travel.js'),
-    () => import('./hotels/vrbo.js'),
     () => import('./hotels/airbnb.js'),
+    // Disabled — see backlog "Scraper improvements" in CLAUDE.md.
+    // expedia, costco-travel, vrbo all return 0 results (CAPTCHA/Akamai/DOM drift).
+    // () => import('./hotels/expedia.js'),
+    // () => import('./hotels/costco-travel.js'),
+    // () => import('./hotels/vrbo.js'),
   ],
   'vacation-packages': [
     () => import('./vacation-packages/southwest-vacations.js'),
@@ -31,6 +36,7 @@ const SITE_REGISTRY = {
 
 async function main() {
   const params = parseArgs(process.argv);
+  if (params.debug) process.env.CHACON_DEBUG = '1';
   const today = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
 
   console.log(`\nvacAI Search — ${params.category}`);

@@ -14,6 +14,7 @@ Call `mcp__chacon-travel-db__get_trips` to list saved trips.
 - If "New trip" or no saved trips, prompt via a single AskUserQuestion call for:
   - **Origin** (city or airport code) — required for flights/packages
   - **Destination** (city, region, or address)
+  - **Anchor / experience** — once the destination is known, infer 4-6 well-known landmarks/attractions in that area (Orlando → Disney/Universal/Islands of Adventure; Vegas → The Strip/Bellagio/Caesars; NYC → Times Square/Central Park) and offer them via AskUserQuestion plus a "None" option. The pick becomes the hotel-distance origin.
   - **Departure date** (YYYY-MM-DD)
   - **Return date** (YYYY-MM-DD)
   - **Number of travelers** (default 1)
@@ -36,7 +37,7 @@ Wait for it to complete and report which sites succeeded vs. errored.
 ```
 Run the headless Playwright search for hotels only. Do not ask questions.
 Run:
-  node --no-warnings "${CLAUDE_PLUGIN_ROOT}/playwright/search.js" hotels --destination "[destination]" --depart [depart] --return [return] --travelers [travelers] --rooms [rooms] [--trip "[trip label]"]
+  node --no-warnings "${CLAUDE_PLUGIN_ROOT}/playwright/search.js" hotels --destination "[destination]" --depart [depart] --return [return] --travelers [travelers] --rooms [rooms] [--anchor "[landmark]"] [--trip "[trip label]"]
 Wait for it to complete and report which sites succeeded vs. errored.
 ```
 

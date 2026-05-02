@@ -1,6 +1,6 @@
 {
   "name": "chacon-travel",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Browser-automated travel search for flights, hotels, and vacation packages. Headless Playwright scrapes Google Flights, Google Hotels, Kayak, Expedia, Costco Travel, Southwest Vacations and more, persisting results to a local SQLite database for snapshot history and price-drift queries.",
   "author": {
     "name": "Joe Chacon"

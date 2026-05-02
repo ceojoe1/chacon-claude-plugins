@@ -18,8 +18,12 @@ Options:
   --sites        Comma-separated list of sites to run (default: all)
                  e.g. --sites "Google Flights,Expedia"
   --trip         Trip label (e.g. "databricks ai summit") for results table
+  --anchor       Landmark/experience to use as the geocoding origin for hotel
+                 distance calculation (e.g. "Islands of Adventure"). Falls back
+                 to the destination if not provided.
   --max-hotels   Max hotels to drill into (hotels only, default: 8)
   --export       Also write .md/.csv files alongside SQLite (default: false)
+  --debug        Verbose scraper logging (per-click traces). Default: false.
   --headed       Launch visible browser (default: headless)
   --timeout      Per-site timeout ms (default: 120000)
   --pause        Keep browser open N seconds after search (default: 0, implies --headed)
@@ -49,18 +53,20 @@ export function toSlug(value) {
  */
 export function parseArgs(argv) {
   const raw = minimist(argv.slice(2), {
-    string: ['origin', 'destination', 'depart', 'return', 'slug', 'sites', 'trip'],
-    boolean: ['headed', 'parallel', 'export'],
+    string: ['origin', 'destination', 'depart', 'return', 'slug', 'sites', 'trip', 'anchor'],
+    boolean: ['headed', 'parallel', 'export', 'debug'],
     default: {
       travelers: 1,
       rooms: 1,
-      timeout: 300000,
+      timeout: 600000,
       headed: false,
       pause: 0,
       sites: '',
       trip: '',
+      anchor: '',
       'max-hotels': 8,
       export: false,
+      debug: false,
       parallel: true,
     },
   });
@@ -104,8 +110,10 @@ export function parseArgs(argv) {
     travelers: Number(raw.travelers),
     rooms: Number(raw.rooms),
     trip: raw.trip || '',
+    anchor: raw.anchor || '',
     maxHotels: Number(raw['max-hotels']),
     export: !!raw.export,
+    debug: !!raw.debug,
     slug,
     sitesFilter,
     headed: raw.headed || Number(raw.pause) > 0,

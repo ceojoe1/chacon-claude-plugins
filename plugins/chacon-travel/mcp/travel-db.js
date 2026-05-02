@@ -11,6 +11,31 @@ const DB_PATH = DATA_DIR_ENV
   ? path.resolve(DATA_DIR_ENV, 'vacai.db')
   : path.resolve(__dirname, '../data/vacai.db');
 
+// Render a long booking URL as a short clickable markdown link. Google's
+// aclk/travel/clk redirects encode the destination in `pcurl` or `adurl` —
+// pull the destination domain so the user sees "[booking.com](https://...)"
+// instead of a 200-char URL in the rendered table.
+function shortLink(url) {
+  if (!url || url === '—') return '—';
+  let display = url;
+  try {
+    const u = new URL(url);
+    if (u.hostname === 'google.com' || u.hostname.endsWith('.google.com')) {
+      const dest = u.searchParams.get('pcurl') || u.searchParams.get('adurl');
+      if (dest) {
+        try { display = new URL(decodeURIComponent(dest)).hostname.replace(/^www\./, ''); } catch {}
+      } else {
+        display = u.hostname.replace(/^www\./, '');
+      }
+    } else {
+      display = u.hostname.replace(/^www\./, '');
+    }
+  } catch {
+    display = url.length > 30 ? url.slice(0, 27) + '…' : url;
+  }
+  return `[${display}](${url})`;
+}
+
 let _db = null;
 
 function getDb() {
@@ -68,7 +93,7 @@ function queryPriceHistory(slug, category) {
     `).all(slug);
     if (!rows.length) return `No hotel history found for "${slug}".`;
     return `Hotel price history for ${slug}:\n` + rows.map(r =>
-      `${r.searched_at.slice(0, 10)} | ${r.site} | ${r.property || '—'} | ${r.distance || '—'} | ${r.rating || '—'} | ${r.per_night || '—'}/night | ${r.total || '—'} (fees ${r.fees || '—'}) via ${r.source || '—'}${r.error ? ` | ⚠ ${r.error}` : ''}`
+      `${r.searched_at.slice(0, 10)} | ${r.site} | ${r.property || '—'} | ${r.distance || '—'} | ${r.rating || '—'} | ${r.per_night || '—'}/night | ${r.total || '—'} (fees ${r.fees || '—'}) via ${r.source || '—'} ${shortLink(r.source_link)}${r.error ? ` | ⚠ ${r.error}` : ''}`
     ).join('\n');
   }
 

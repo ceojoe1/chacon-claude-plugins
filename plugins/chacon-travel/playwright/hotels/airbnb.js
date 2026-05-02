@@ -1,4 +1,5 @@
 import { humanDelay, detectCaptcha, selectCalendarDate, selectAutocomplete } from '../sites/helpers.js';
+import { debug } from '../lib/log.js';
 
 const SITE = 'Airbnb';
 const URL = 'https://www.airbnb.com';
@@ -36,7 +37,7 @@ async function search(context, params) {
       if (field) { field.focus(); field.click(); return true; }
       return false;
     });
-    console.log(`      [AB] dest field clicked via evaluate: ${destClicked}`);
+    debug(`      [AB] dest field clicked via evaluate: ${destClicked}`);
     await humanDelay(400, 600);
     await page.keyboard.type(params.destination, { delay: 80 });
     await humanDelay(800, 1200);
@@ -51,7 +52,7 @@ async function search(context, params) {
       await page.keyboard.press('Enter');
     }
     await humanDelay(600, 900);
-    console.log(`      [AB] after dest selection, URL: ${page.url().substring(0, 100)}`);
+    debug(`      [AB] after dest selection, URL: ${page.url().substring(0, 100)}`);
 
     // --- Set dates ---
     // After destination selection Airbnb opens the "When" panel automatically.
@@ -94,9 +95,9 @@ async function search(context, params) {
     };
 
     const departSet = await clickAirbnbDate(params.depart);
-    console.log(`      [AB] depart set: ${departSet}`);
+    debug(`      [AB] depart set: ${departSet}`);
     const returnSet = await clickAirbnbDate(params.return);
-    console.log(`      [AB] return set: ${returnSet}`);
+    debug(`      [AB] return set: ${returnSet}`);
     await humanDelay(400, 600);
 
     // --- Set guests ---
@@ -115,7 +116,7 @@ async function search(context, params) {
         await addAdult.click();
         await humanDelay(200, 300);
       }
-      console.log(`      [AB] guests set to ${params.travelers}`);
+      debug(`      [AB] guests set to ${params.travelers}`);
     }
 
     // --- Search ---
@@ -123,7 +124,7 @@ async function search(context, params) {
       .click({ timeout: 8000 });
     await page.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => {});
     await humanDelay(2000, 3000);
-    console.log(`      [AB] results URL: ${page.url().substring(0, 150)}`);
+    debug(`      [AB] results URL: ${page.url().substring(0, 150)}`);
 
     const _cap2 = await detectCaptcha(page); if (_cap2) {
       return { site: SITE, error: 'CAPTCHA: ' + (_cap2 || _cap) };
@@ -135,7 +136,7 @@ async function search(context, params) {
     const seenProps = new Set();
 
     const titleEls = await page.locator('[data-testid="listing-card-title"]').all();
-    console.log(`      [AB] listing titles: ${titleEls.length}`);
+    debug(`      [AB] listing titles: ${titleEls.length}`);
 
     for (const titleEl of titleEls.slice(0, 10)) {
       const rawTitle = await titleEl.textContent().catch(() => '');

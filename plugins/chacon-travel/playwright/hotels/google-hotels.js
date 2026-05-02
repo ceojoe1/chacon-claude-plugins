@@ -130,6 +130,9 @@ async function search(context, params) {
           && !/results?$/i.test(text)
           && !/Prices in this area/i.test(text)
           && !/Hotels nearby/i.test(text)
+          // Skip vacation rentals and apartments — they use a different DOM
+          // for prices (no triple-dollar pattern) and burn drilldown budget.
+          && !/\b(vacation rental|apartment|condo|house|villa|cabin|cottage|guesthouse|bungalow)\b/i.test(text)
         );
     }).catch(() => []);
 
@@ -145,12 +148,15 @@ async function search(context, params) {
     const allRows = [];
     const seenHotels = new Set();
 
-    // Geocode the search destination once. Each hotel is geocoded as it's
-    // processed (Nominatim is rate-limited to ~1 req/s, so we interleave with
-    // page navigation to mask the latency).
-    const originCoord = await geocode(params.destination);
+    // Geocoding origin: prefer an explicit landmark/experience anchor if the
+    // skill provided one (e.g. "Islands of Adventure"), otherwise fall back
+    // to the destination string. Anchors give meaningful distances when the
+    // destination is fuzzy ("Orlando, FL near Islands of Adventure" doesn't
+    // geocode but "Islands of Adventure" does).
+    const anchorQuery = params.anchor || params.destination;
+    const originCoord = await geocode(anchorQuery);
     const hint = cityHint(params.destination);
-    console.log(`  [Google Hotels]   origin geocoded: ${originCoord ? `${originCoord.lat.toFixed(4)},${originCoord.lon.toFixed(4)}` : 'failed'} | city hint: "${hint}"`);
+    console.log(`  [Google Hotels]   origin geocoded (${params.anchor ? 'anchor' : 'destination'}: "${anchorQuery}"): ${originCoord ? `${originCoord.lat.toFixed(4)},${originCoord.lon.toFixed(4)}` : 'failed'} | city hint: "${hint}"`);
 
     // Per-hotel budget: SERP load (~10s) + N hotels × ~25s each. Cap so we
     // exit cleanly before the search.js outer timeout fires (lose 30s margin).

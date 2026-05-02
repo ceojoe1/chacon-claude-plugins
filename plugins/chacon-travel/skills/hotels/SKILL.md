@@ -13,6 +13,7 @@ Call `mcp__chacon-travel-db__get_trips` to list saved trips.
 - If the user picks a saved trip, pull destination/check-in/check-out/travelers/rooms from its row — skip those questions.
 - If "New trip" or no saved trips, prompt for missing fields via AskUserQuestion:
   - **Destination** (city, neighborhood, or address)
+  - **Anchor / experience** — after the user gives a destination, infer 4-6 well-known landmarks or attractions in that area and offer them via a multi-choice AskUserQuestion plus a "None / use destination as-is" option. Examples: Orlando → Disney World, Universal Studios, Islands of Adventure, SeaWorld, Disney Springs. Las Vegas → The Strip, Caesars Palace, Bellagio, Fremont Street. New York City → Times Square, Central Park, Empire State Building, Brooklyn Bridge. The user's pick becomes the geocoding origin so hotel distances reflect proximity to what they actually care about.
   - **Check-in date** (YYYY-MM-DD)
   - **Check-out date** (YYYY-MM-DD)
   - **Number of guests** (default 1)
@@ -28,6 +29,7 @@ node --no-warnings "${CLAUDE_PLUGIN_ROOT}/playwright/search.js" hotels \
   --destination "<DESTINATION>" \
   --depart <YYYY-MM-DD> --return <YYYY-MM-DD> \
   --travelers <N> --rooms <N> \
+  [--anchor "<LANDMARK>"] \
   [--trip "<TRIP LABEL>"]
 ```
 

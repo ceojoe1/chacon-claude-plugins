@@ -2,6 +2,23 @@
 
 All notable changes to chacon-claude-plugins are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] — 2026-05-02
+
+### Added
+- `--anchor` CLI flag — landmark/experience used as the geocoding origin for hotel distance calculation. `/hotels` and `/search-all` skills now ask the user to pick a well-known landmark in their destination (e.g. Orlando → Disney/Universal/Islands of Adventure) so distances reflect proximity to what the trip is actually about.
+- MCP `get_price_history` renders Source Link as a short clickable markdown link (`[booking.com](full-url)`) instead of the raw 200-char Google redirect URL.
+
+### Added
+- `--debug` CLI flag — gates verbose scraper logs (per-click traces, calendar nav, price-element counts) behind a flag. Default off so user-facing runs stay clean.
+- `lib/log.js` — tiny logger with `info()` (always prints) and `debug()` (only when `CHACON_DEBUG=1`).
+
+### Changed
+- Default per-site timeout bumped 300s → 600s. The 8-hotels × 6-sites parallel run was hitting the previous limit before partial-results could be returned.
+- Google Hotels SERP filter now excludes vacation rentals / apartments / condos / villas — they use a different DOM with no triple-dollar pattern and burn drilldown budget on 0 results.
+- Hotels registry trimmed to the working scrapers: Google Hotels, Kayak, Airbnb. Expedia, Costco Travel, and VRBO are commented out pending fixes (tracked in CLAUDE.md backlog).
+- Flights registry trimmed to the working scrapers: Google Flights, Kayak, United. Southwest, Expedia, and Orbitz are commented out (XHR block / Akamai / DataDome respectively — tracked in CLAUDE.md backlog).
+- Kayak and Airbnb hotel scrapers' click-by-click logs now use `debug()` instead of `console.log()` — silent by default unless `--debug` is passed.
+
 ## [2.0.0] — 2026-05-02
 
 ### Breaking
@@ -35,5 +52,6 @@ All notable changes to chacon-claude-plugins are documented here. The format fol
 
 Last v1 release. See git history for prior changes.
 
-[2.0.0]: https://github.com/ceojoe1/chacon-claude-plugins/compare/v1.2.5...HEAD
+[2.0.1]: https://github.com/ceojoe1/chacon-claude-plugins/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/ceojoe1/chacon-claude-plugins/compare/v1.2.5...v2.0.0
 [1.2.5]: https://github.com/ceojoe1/chacon-claude-plugins/releases/tag/v1.2.5
