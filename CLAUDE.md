@@ -62,7 +62,10 @@ Things to circle back to in future sessions (kept here so context survives `/cle
 ### Backlog
 
 - **Fix Southwest flight-row rendering** — the southwest.com scraper hits an XHR-level bot block; flight rows never render. Needs a different approach (Chrome MCP with a real session, or the southwest mobile API).
-- **Refactor Expedia (blocked by Akamai)** — partial refactor exists in `flights/expedia.js` (filtered URL, modal tier-pick flow, returning-page scrape) but Akamai's "Access Denied" hits fresh sessions. Needs stronger stealth or a real-Chrome path.
+- **Refactor Expedia flights (blocked by Akamai)** — partial refactor exists in `flights/expedia.js` (filtered URL, modal tier-pick flow, returning-page scrape) but Akamai's "Access Denied" hits fresh sessions. Needs stronger stealth or a real-Chrome path.
+- **Re-enable disabled hotel scrapers** — `hotels/expedia.js`, `hotels/costco-travel.js`, `hotels/vrbo.js` were commented out of the registry in v2.0.1 because they returned 0 results in the Orlando smoke test. Likely causes: Akamai (Expedia), DOM drift (Costco Travel), CAPTCHA (VRBO). Diagnose each, fix, re-add to `playwright/search.js` hotels registry.
+
+- **Schedule Dependabot triage routine** — set up a recurring remote agent (via `/schedule`) that runs every Monday at 9 AM America/Denver (cron `0 15 * * 1` UTC) on `ceojoe1/chacon-claude-plugins`. Behavior: list open Dependabot PRs, auto-merge patch/minor bumps with green CI (`gh pr merge <N> --squash --delete-branch`), comment on major bumps with upstream changelog link for human review, post `@dependabot recreate` on PRs with red CI. End with one-line summary `merged: N, commented: N, recreated: N, skipped: N`. **Blocker:** GitHub isn't connected for this repo on the routines side — run `/web-setup` (or install the Claude GitHub App at https://claude.ai/code/onboarding?magic=github-app-setup) before creating the routine, otherwise the agent can't do anything.
 
 ## Working Defaults
 

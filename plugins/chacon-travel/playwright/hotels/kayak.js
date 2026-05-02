@@ -1,4 +1,5 @@
 import { humanDelay, detectCaptcha } from '../sites/helpers.js';
+import { debug } from '../lib/log.js';
 
 const SITE = 'Kayak';
 const URL = 'https://www.kayak.com/hotels';
@@ -27,7 +28,7 @@ async function search(context, params) {
 
     const destInput = page.locator('input[placeholder*="city, hotel"]').first();
     const destInputVisible = await destInput.isVisible({ timeout: 3000 }).catch(() => false);
-    console.log(`      [KH] dest input visible: ${destInputVisible}`);
+    debug(`      [KH] dest input visible: ${destInputVisible}`);
 
     if (destInputVisible) {
       await destInput.fill(params.destination);
@@ -46,12 +47,12 @@ async function search(context, params) {
       await page.keyboard.press('Enter');
     }
     await humanDelay(600, 900);
-    console.log(`      [KH] destination selected`);
+    debug(`      [KH] destination selected`);
 
     // --- Open calendar ---
     const startDateBtn = page.locator('[aria-label*="Select start date from calendar input"]').first();
     const startDateVisible = await startDateBtn.isVisible({ timeout: 3000 }).catch(() => false);
-    console.log(`      [KH] start date btn visible: ${startDateVisible}`);
+    debug(`      [KH] start date btn visible: ${startDateVisible}`);
     if (startDateVisible) {
       await startDateBtn.click();
       await humanDelay(1000, 1500);
@@ -62,7 +63,7 @@ async function search(context, params) {
       const monthYear = d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }); // "July 2026"
       const dayLabel = d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }); // "July 10, 2026"
 
-      console.log(`      [KH] targeting date: ${dayLabel}`);
+      debug(`      [KH] targeting date: ${dayLabel}`);
 
       // Navigate forward month by month using "Next Month" button until target month is visible
       // Fresh context calendar: paginated (2 months shown), not scrollable
@@ -70,7 +71,7 @@ async function search(context, params) {
         const captions = await page.evaluate(() =>
           Array.from(document.querySelectorAll('caption.w0lb-month-name')).map(c => c.textContent.trim())
         );
-        console.log(`      [KH cal attempt=${attempt}] captions: ${JSON.stringify(captions)}`);
+        debug(`      [KH cal attempt=${attempt}] captions: ${JSON.stringify(captions)}`);
 
         if (captions.includes(monthYear)) {
           // Month is visible — find and click the day cell
@@ -84,7 +85,7 @@ async function search(context, params) {
             return dayEl.getAttribute('aria-label');
           }, dayLabel);
 
-          console.log(`      [KH] day click result: ${clicked}`);
+          debug(`      [KH] day click result: ${clicked}`);
           if (clicked) {
             await humanDelay(400, 600);
             return true;
@@ -97,7 +98,7 @@ async function search(context, params) {
           if (btn) { btn.click(); return true; }
           return false;
         });
-        console.log(`      [KH] next month clicked: ${advanced}`);
+        debug(`      [KH] next month clicked: ${advanced}`);
         if (!advanced) break;
         await humanDelay(500, 700);
       }
@@ -105,20 +106,20 @@ async function search(context, params) {
     };
 
     const departSet = await clickKayakDate(params.depart);
-    console.log(`      [KH] depart set: ${departSet}`);
+    debug(`      [KH] depart set: ${departSet}`);
 
     // After first date click, calendar may still be open for return date
     await humanDelay(400, 600);
     const returnSet = await clickKayakDate(params.return);
-    console.log(`      [KH] return set: ${returnSet}`);
+    debug(`      [KH] return set: ${returnSet}`);
 
     // Confirm date selection (if a confirm button exists)
     const confirmBtn = page.locator('button, [role="button"]').filter({ hasText: /Select these dates/i }).first();
     const confirmVisible = await confirmBtn.isVisible({ timeout: 1500 }).catch(() => false);
-    console.log(`      [KH] confirm btn visible: ${confirmVisible}`);
+    debug(`      [KH] confirm btn visible: ${confirmVisible}`);
     if (confirmVisible) {
       await confirmBtn.click();
-      console.log(`      [KH] dates confirmed`);
+      debug(`      [KH] dates confirmed`);
       await humanDelay(600, 900);
     } else {
       // Calendar auto-closes after both dates selected — press Escape to close if still open
@@ -133,7 +134,7 @@ async function search(context, params) {
     if (params.travelers > 1) {
       const guestsBtn = page.locator('button').filter({ hasText: /guests?/i }).first();
       const guestsBtnVisible = await guestsBtn.isVisible({ timeout: 2000 }).catch(() => false);
-      console.log(`      [KH] guests btn visible: ${guestsBtnVisible}`);
+      debug(`      [KH] guests btn visible: ${guestsBtnVisible}`);
       if (guestsBtnVisible) {
         await guestsBtn.click();
         await humanDelay(500, 700);
@@ -163,7 +164,7 @@ async function search(context, params) {
 
     const searchBtn = page.locator('button[aria-label="Search"], button:has-text("Search")').first();
     const searchBtnVisible = await searchBtn.isVisible({ timeout: 3000 }).catch(() => false);
-    console.log(`      [KH] search btn visible: ${searchBtnVisible}`);
+    debug(`      [KH] search btn visible: ${searchBtnVisible}`);
     if (searchBtnVisible) {
       await searchBtn.click({ force: true });
     } else {
@@ -179,8 +180,8 @@ async function search(context, params) {
     const resultsPage = newTab || page;
     await resultsPage.waitForLoadState('networkidle', { timeout: 30_000 }).catch(() => {});
     await humanDelay(2500, 3500);
-    console.log(`      [KH] results URL: ${resultsPage.url().substring(0, 150)}`);
-    console.log(`      [KH] is new tab: ${!!newTab}`);
+    debug(`      [KH] results URL: ${resultsPage.url().substring(0, 150)}`);
+    debug(`      [KH] is new tab: ${!!newTab}`);
 
     const _cap2 = await detectCaptcha(resultsPage); if (_cap2) {
       return { site: SITE, error: 'CAPTCHA: ' + _cap2 };
@@ -191,7 +192,7 @@ async function search(context, params) {
     const seen = new Set();
 
     const priceEls = await resultsPage.locator('*').filter({ hasText: /^\$[\d,]{2,6}$/ }).all();
-    console.log(`      [KH] price elements: ${priceEls.length}`);
+    debug(`      [KH] price elements: ${priceEls.length}`);
 
     for (const el of priceEls.slice(0, 40)) {
       const cardInfo = await el.evaluate(e => {
@@ -213,7 +214,7 @@ async function search(context, params) {
       const perNightNum = parseFloat(priceMatch[0].replace(/[^0-9.]/g, ''));
       if (!perNightNum || perNightNum < 30 || perNightNum > 10000) continue;
 
-      console.log(`      [KH card] ${cardInfo.substring(0, 200)}`);
+      debug(`      [KH card] ${cardInfo.substring(0, 200)}`);
 
       const totalNum = perNightNum * nights;
       const nameMatch = cardInfo.match(/^([^$\n]{5,60})/);
