@@ -55,11 +55,7 @@ Things to circle back to in future sessions (kept here so context survives `/cle
 
 ### In progress
 
-- **Google Hotels scraper rewrite** (`hotels/google-hotels.js`) — drilldown flow per `debugging/hotels/google-hotels/google-hotels.md`. Direct `?q=<address>` URL, navigate top 8 hotel cards into detail pages, scrape top 3 cheapest price options per hotel. **Open issue:** the per-night → "Stay Total" dropdown switch isn't firing — the trigger button is not inside `#prices` and isn't matched by aria-haspopup or text heuristics. The user-confirmed XPath for the trigger is:
-  ```
-  /html/body/c-wiz[2]/div/c-wiz/div[1]/div[2]/div[2]/div[2]/div[2]/c-wiz/div/div/div[2]/span[2]/c-wiz[1]/c-wiz[1]/div/section/div[1]/div[3]/span/span/span
-  ```
-  The before/after URLs (per-night vs Stay Total) are **identical** — the price-display preference is stored in cookies/localStorage, not the URL. Next session: use the XPath above to click directly, OR set the localStorage key Google uses for price-display.
+- **Expand hotels results schema** — add columns: Trip (CLI `--trip` flag), Search, Distance from destination (scrape from SERP card text), Check-in Date, Check-in Time (default 3PM), Check-out Date, Check-out Time (default 11AM), Per Night, Total, Fees (col2 - col1 from triple-price pattern × nights), Source. See `debugging/hotels/google-hotels/google-hotels.md` for the triple-price structure.
 
 - **Add Orbitz flight scraper** (`flights/orbitz.js`) — file exists (clone of `expedia.js` with `.com` swap and `[Orbitz]` log labels). First page load works on a fresh session, but subsequent loads hit DataDome ("we can't tell if you're a human") since Expedia Group shares fraud detection across brands. Needs stronger stealth or a real-Chrome path. Already registered in `search.js` flight registry.
 
@@ -76,3 +72,4 @@ Things to circle back to in future sessions (kept here so context survives `/cle
 - Process exits cleanly via `process.exit(0)` after `main()` resolves.
 - Kayak filter chain (post-loosening): `cabin=-f;stops=-2;hidebasic=hidebasic` with `sort=bestflight_a`. Removed prior airline exclusions (`-AS,B6`) and bag-required filters (`bfc=1;cfc=1`) that limited results to Southwest only.
 - Google Flights drilldown: clicks the time-text element on each Top Departing card (avoids CO2 popup buttons), `page.goto(searchUrl)` between cards (more reliable than `goBack()`), retry-once on 0-return cards.
+- Google Hotels: drills top 3 hotel detail pages via card `<a href>`. The DOM contains all three price formats per row simultaneously (`$nightly_base $nightly_with_fees $stay_total Visit site`) — extract stay total directly with the triple-dollar regex; the "Stay total" dropdown is purely visual and never needs to be opened. Use `document.querySelectorAll('#prices')[1]` (Google emits two `#prices` — index 0 is the heading, index 1 is the data). Per-site timeout should be `≥ 240000ms` for 3-hotel runs.

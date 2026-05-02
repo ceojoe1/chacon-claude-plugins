@@ -17,6 +17,8 @@ Options:
   --slug         Override destination folder slug (e.g. orlando-fl)
   --sites        Comma-separated list of sites to run (default: all)
                  e.g. --sites "Google Flights,Expedia"
+  --trip         Trip label (e.g. "databricks ai summit") for results table
+  --max-hotels   Max hotels to drill into (hotels only, default: 8)
   --headed       Launch visible browser (default: headless)
   --timeout      Per-site timeout ms (default: 120000)
   --pause        Keep browser open N seconds after search (default: 0, implies --headed)
@@ -46,15 +48,17 @@ export function toSlug(value) {
  */
 export function parseArgs(argv) {
   const raw = minimist(argv.slice(2), {
-    string: ['origin', 'destination', 'depart', 'return', 'slug', 'sites'],
+    string: ['origin', 'destination', 'depart', 'return', 'slug', 'sites', 'trip'],
     boolean: ['headed', 'parallel'],
     default: {
       travelers: 1,
       rooms: 1,
-      timeout: 120000,
+      timeout: 300000,
       headed: false,
       pause: 0,
       sites: '',
+      trip: '',
+      'max-hotels': 8,
       parallel: true,
     },
   });
@@ -97,6 +101,8 @@ export function parseArgs(argv) {
     return: raw.return,
     travelers: Number(raw.travelers),
     rooms: Number(raw.rooms),
+    trip: raw.trip || '',
+    maxHotels: Number(raw['max-hotels']),
     slug,
     sitesFilter,
     headed: raw.headed || Number(raw.pause) > 0,

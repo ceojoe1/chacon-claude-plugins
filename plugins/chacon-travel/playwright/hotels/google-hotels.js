@@ -1,6 +1,15 @@
 import { humanDelay, detectCaptcha } from '../sites/helpers.js';
+import { geocode, haversineMiles } from '../lib/distance.js';
 
 const SITE = 'Google Hotels';
+
+// Pull a city/region hint from the search query for hotel geocoding.
+// "747 Howard Street, San Francisco, CA 94103" → "San Francisco, CA"
+function cityHint(destination) {
+  const parts = destination.split(',').map(s => s.trim());
+  if (parts.length >= 2) return parts.slice(-2).join(', ').replace(/\s*\d{5}.*$/, '').trim();
+  return destination;
+}
 
 function nightCount(depart, ret) {
   return Math.round((new Date(ret) - new Date(depart)) / (1000 * 60 * 60 * 24));
@@ -127,7 +136,7 @@ async function search(context, params) {
     if (hotelCardHandles.length === 0) {
       return { site: SITE, error: 'No hotel cards passed filter (sponsored/info-only?)' };
     }
-    const maxCards = Math.min(hotelCardHandles.length, 8);
+    const maxCards = Math.min(hotelCardHandles.length, params.maxHotels || 8);
     console.log(`  [Google Hotels] ${hotelCardHandles.length} qualifying hotel cards — drilling top ${maxCards}`);
 
     // Snapshot results-page URL so we can return after each detail navigation.
@@ -136,7 +145,24 @@ async function search(context, params) {
     const allRows = [];
     const seenHotels = new Set();
 
+    // Geocode the search destination once. Each hotel is geocoded as it's
+    // processed (Nominatim is rate-limited to ~1 req/s, so we interleave with
+    // page navigation to mask the latency).
+    const originCoord = await geocode(params.destination);
+    const hint = cityHint(params.destination);
+    console.log(`  [Google Hotels]   origin geocoded: ${originCoord ? `${originCoord.lat.toFixed(4)},${originCoord.lon.toFixed(4)}` : 'failed'} | city hint: "${hint}"`);
+
+    // Per-hotel budget: SERP load (~10s) + N hotels × ~25s each. Cap so we
+    // exit cleanly before the search.js outer timeout fires (lose 30s margin).
+    const hotelBudgetMs = 25_000;
+    const outerTimeout = (params.timeout || 300_000) - 30_000;
+    const hardDeadline = Date.now() + Math.min(outerTimeout, maxCards * hotelBudgetMs + 30_000);
+
     for (let i = 0; i < maxCards; i++) {
+      if (Date.now() > hardDeadline) {
+        console.log(`  [Google Hotels] Hit time budget at hotel ${i + 1}/${maxCards} — returning partial results`);
+        break;
+      }
       const { text: cardText, href } = hotelCardHandles[i];
       const flat = cardText.replace(/\s+/g, ' ').trim();
       const nameLine = flat.split(/[•·]/)[0].split('$')[0].trim();
@@ -152,136 +178,104 @@ async function search(context, params) {
       const ratingMatch = flat.match(/(\d\.\d)\s*\(/);
       const rating = ratingMatch ? `⭐${ratingMatch[1]}` : '—';
 
+      let distance = '—';
+      let hotelAddress = '';
+
       // Navigate directly to the hotel's detail page via the card's <a href>.
       // Wait for networkidle so price-source XHRs finish, then for #prices
       // to render at least one $ value (not just the empty heading).
-      await page.goto(href, { waitUntil: 'domcontentloaded', timeout: 25_000 }).catch(() => {});
-      await page.waitForLoadState('networkidle', { timeout: 12_000 }).catch(() => {});
-      await page.locator('#prices').first().waitFor({ timeout: 12_000 }).catch(() => {});
-      // Wait for at least one price to actually appear inside #prices.
+      await page.goto(href, { waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => {});
+      // Wait for the price section to actually populate. innerText on #prices
+      // returns empty (Google's components), so check via querySelectorAll.
       await page.waitForFunction(() => {
         const p = document.querySelector('#prices');
-        return p && /\$\d{2,5}/.test(p.innerText || '');
-      }, { timeout: 10_000 }).catch(() => {});
-
-      // Switch the price dropdown to "Stay total". The trigger button can
-      // live above the #prices section (in the page header). Search the
-      // whole document for a button whose text matches the per-night /
-      // display-price affordance, or that has aria-haspopup="dialog".
-      const switched = await page.evaluate(() => {
-        const buttons = Array.from(document.querySelectorAll('button, [role="button"]'));
-        // Prefer literal text matches first — most stable.
-        const trigger =
-          buttons.find(b => /^(Per night|\$\s*per night)$/i.test(b.innerText.trim()))
-          || buttons.find(b => /per night/i.test(b.innerText) && b.innerText.length < 30)
-          || buttons.find(b => /^(Display|Sort|Filter)\s*by/i.test(b.innerText.trim()))
-          || buttons.find(b => b.getAttribute('aria-haspopup') === 'dialog'
-                                 && /night|total|price|display/i.test(b.innerText + (b.getAttribute('aria-label') || '')));
-        if (!trigger) {
-          // Last-ditch dump: list a few buttons so we can see what's there.
-          const sample = buttons.slice(0, 30).map(b => ({
-            text: b.innerText?.slice(0, 30).replace(/\s+/g, ' ').trim(),
-            popup: b.getAttribute('aria-haspopup'),
-            label: b.getAttribute('aria-label')?.slice(0, 40),
-          })).filter(b => b.text);
-          return { triggered: false, reason: 'no trigger button', sample };
+        if (!p) return false;
+        const all = p.querySelectorAll('*');
+        for (const el of all) {
+          if (/\$\d{2,5}/.test(el.textContent || '')) return true;
         }
-        trigger.scrollIntoView({ block: 'center' });
-        trigger.click();
-        return { triggered: true, label: trigger.innerText.slice(0, 50) };
-      }).catch(() => ({ triggered: false, reason: 'eval error' }));
+        return false;
+      }, { timeout: 8_000 }).catch(() => {});
 
-      console.log(`  [Google Hotels]   dropdown trigger: ${switched.triggered ? `"${switched.label}"` : `failed (${switched.reason})`}`);
-      if (switched.triggered) {
-        // Wait for the dialog/menu to actually become visible — the click
-        // returns immediately but the popup animates in.
-        await page.locator('[role="dialog"], [role="menu"]').first()
-          .waitFor({ state: 'visible', timeout: 5_000 }).catch(() => {});
-
-        const dialogOpts = await page.evaluate(() => {
-          const dlg = document.querySelector('[role="dialog"], [role="menu"]');
-          if (!dlg) return null;
-          return Array.from(dlg.querySelectorAll('[role="menuitem"], [role="menuitemradio"], [role="option"], button, label, span'))
-            .map(el => el.innerText?.replace(/\s+/g, ' ').trim() || '')
-            .filter(t => t && t.length < 60)
-            .slice(0, 20);
-        }).catch(() => null);
-        console.log(`  [Google Hotels]   dialog options: ${JSON.stringify(dialogOpts)}`);
-
-        const stayTotalOption = page.locator('[role="dialog"], [role="menu"]')
-          .locator('text=/(Stay total|Total for \\d+ nights?|Total price)/i').first();
-        const optVisible = await stayTotalOption.isVisible({ timeout: 3_000 }).catch(() => false);
-        if (optVisible) {
-          // Capture an existing price string so we can wait for it to change
-          // after switching to Stay Total.
-          const beforePrice = await page.evaluate(() => {
-            const p = document.querySelector('#prices');
-            const m = p?.innerText.match(/\$[\d,]+/);
-            return m ? m[0] : null;
-          }).catch(() => null);
-
-          await stayTotalOption.click().catch(() => {});
-
-          // Wait for price text inside #prices to change (Stay Total values
-          // are higher than per-night, so the displayed string differs).
-          await page.waitForFunction(prev => {
-            const p = document.querySelector('#prices');
-            const m = p?.innerText.match(/\$[\d,]+/);
-            return m && m[0] !== prev;
-          }, beforePrice, { timeout: 6_000 }).catch(() => {});
-          await humanDelay(500, 800);
-          console.log(`  [Google Hotels]   Stay total switched (${beforePrice} → updated)`);
-        } else {
-          console.log(`  [Google Hotels]   Stay total option NOT FOUND in dialog`);
+      // Scrape the hotel's full street address from the detail-page header.
+      // User-confirmed XPath (indices vary slightly per hotel, like the Stay
+      // Total trigger). Structural form: section first-row → div[2] > span[1].
+      hotelAddress = await page.evaluate(() => {
+        // Try a structural selector first; fall back to scanning section spans
+        // for street-pattern text.
+        const candidates = [];
+        for (const sec of document.querySelectorAll('section')) {
+          for (const sp of sec.querySelectorAll('div div div span')) {
+            const t = (sp.textContent || '').trim();
+            // Address heuristic: starts with a number, contains a comma.
+            if (/^\d+\s+\w/.test(t) && t.includes(',') && t.length < 200) {
+              candidates.push(t);
+            }
+          }
         }
+        return candidates[0] || '';
+      }).catch(() => '');
+
+      if (originCoord) {
+        const query = hotelAddress || `${property}, ${hint}`;
+        const hotelCoord = await geocode(query);
+        const miles = haversineMiles(originCoord, hotelCoord);
+        if (miles != null) distance = `${miles.toFixed(1)} mi`;
       }
+      console.log(`  [Google Hotels]   address: "${hotelAddress || '(fallback to property name)'}" → ${distance}`);
 
-      // Scrape the price-option list. Per the debug doc:
-      //   #prices > c-wiz.K1smNd > c-wiz.tuyxUe > div > section > div.A5WLXb > c-wiz > div
-      // Fall back to a more permissive selector if the strict path doesn't match.
-      const optionTexts = await page.evaluate(() => {
-        const tryPaths = [
-          '#prices c-wiz.K1smNd c-wiz.tuyxUe section div.A5WLXb c-wiz > div',
-          '#prices c-wiz section c-wiz > div',
-          '#prices section c-wiz',
-          '#prices section',
-          '#prices',
-        ];
-        let container = null;
-        for (const sel of tryPaths) {
-          container = document.querySelector(sel);
-          if (container) break;
-        }
-        if (!container) return [];
-        // Cast a wider net — any descendant with a price + provider text.
-        return Array.from(container.querySelectorAll('div, a, li'))
-          .map(el => el.innerText?.replace(/\s+/g, ' ').trim() || '')
-          .filter(t => /\$\d{2,5}/.test(t) && t.length < 300 && !/sponsored/i.test(t));
+      // Each price row in #prices contains "<source/desc> $base $withFees $total Visit site"
+      // and a "Visit site" anchor whose href is the booking link. Walk up from
+      // each anchor to find its row container (the one whose textContent has
+      // ≥3 dollar values), then capture {text, href} per row.
+      const priceRows = await page.evaluate(() => {
+        const all = Array.from(document.querySelectorAll('#prices'));
+        const real = all[1] || all[0];
+        if (!real) return [];
+        const anchors = Array.from(real.querySelectorAll('a'))
+          .filter(a => /visit site/i.test(a.textContent || ''));
+        return anchors.map(a => {
+          let row = a.parentElement;
+          for (let depth = 0; depth < 8 && row; depth++) {
+            const text = row.textContent || '';
+            const dollars = text.match(/\$[\d,]+/g) || [];
+            if (dollars.length >= 3) {
+              return { text: text.replace(/\s+/g, ' ').trim(), href: a.href };
+            }
+            row = row.parentElement;
+          }
+          return { text: '', href: a.href };
+        }).filter(r => r.text);
       }).catch(() => []);
 
-      console.log(`  [Google Hotels] ${property}: found ${optionTexts.length} price option(s)`);
-
-      // Parse each option. With Stay Total enabled the captured number is
-      // the total for the whole stay; per-night = total / nights.
       const KNOWN_SOURCES = [
         'Booking.com', 'Expedia', 'Hotels.com', 'Agoda', 'Priceline',
-        'Trip.com', 'Trivago', 'Super.com', 'Orbitz', 'Hotwire',
-        'Travelocity', 'Vio.com', 'Snaptravel', 'Kayak', 'Google Hotels',
+        'Trip.com', 'Trivago', 'Super.com', 'Orbitz', 'Hotwire', 'Travelocity',
+        'Vio.com', 'Snaptravel', 'Kayak', 'Vrbo', 'Marriott', 'Hilton',
+        'Hyatt', 'IHG', 'Choice', 'Best Western', 'Wyndham',
       ];
+
+      // Parse the first triple-price match per row. m[2]=nightly_base,
+      // m[3]=nightly_with_fees, m[4]=stay_total.
+      const TRIPLE = /\$([\d,]+)\s*\$([\d,]+)\s*\$([\d,]+)/;
+      const minTotal = nights * 40;
       const options = [];
-      for (const text of optionTexts) {
-        const priceMatch = text.match(/\$([\d,]+)/);
-        if (!priceMatch) continue;
-        const total = parseFloat(priceMatch[1].replace(/,/g, ''));
-        // Plausible-range filter: a 4-night stay total above $80 and below
-        // $20k. Single-night per-night prices below ~$80 will be rejected.
-        if (!total || total < 80 || total > 20_000) continue;
+      for (const { text, href } of priceRows) {
+        const m = text.match(TRIPLE);
+        if (!m) continue;
+        const nightlyBase = parseFloat(m[1].replace(/,/g, ''));
+        const nightlyFees = parseFloat(m[2].replace(/,/g, ''));
+        const total = parseFloat(m[3].replace(/,/g, ''));
+        if (!total || total < minTotal || total > 20_000) continue;
+        const fees = Math.max(0, Math.round((nightlyFees - nightlyBase) * nights));
+        const before = text.split(/\$/)[0].trim();
         const matchedSource = KNOWN_SOURCES.find(s =>
-          text.toLowerCase().includes(s.toLowerCase())
+          before.toLowerCase().includes(s.toLowerCase())
         );
-        const source = matchedSource || text.slice(0, 30).split('$')[0].trim() || 'Google Hotels';
-        options.push({ source, total });
+        const source = matchedSource || 'Hotel direct';
+        options.push({ source, total, fees, href });
       }
+      console.log(`  [Google Hotels] ${property}: parsed ${options.length} price row(s)`);
 
       // Take the 3 cheapest unique price points for this hotel.
       const sorted = options.sort((a, b) => a.total - b.total);
@@ -300,9 +294,13 @@ async function search(context, params) {
           property,
           type: 'Hotel',
           rating,
+          distance,
           perNight: '$' + perNightNum.toLocaleString('en-US', { maximumFractionDigits: 0 }),
           total: '$' + opt.total.toLocaleString('en-US', { maximumFractionDigits: 0 }),
-          notes: `${nights} nights via ${opt.source}`,
+          fees: opt.fees ? '$' + opt.fees.toLocaleString('en-US') : '—',
+          source: opt.source,
+          sourceLink: opt.href || '',
+          notes: `${nights} nights`,
         });
       }
 

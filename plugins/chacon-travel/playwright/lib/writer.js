@@ -155,31 +155,83 @@ function flattenResults(results) {
   return out;
 }
 
-/**
- * Builds the results.md content for a hotels search.
- */
-function buildHotelsTable(results) {
-  const sections = [];
-  for (const [site, rows] of groupBySite(results)) {
-    sections.push(`#### ${site}`);
-    sections.push('');
-    if (rows.length === 1 && rows[0].error) {
-      sections.push(`_${rows[0].error}_`);
-      sections.push('');
+// Flat-table column order for hotels — used by both Markdown and CSV outputs.
+const HOTEL_COLUMNS = [
+  'Processed Timestamp',
+  'Trip',
+  'Search',
+  'Site',
+  'Hotel',
+  'Distance',
+  'Rating',
+  'Check-in',
+  'Check-in Time',
+  'Check-out',
+  'Check-out Time',
+  'Per Night',
+  'Total',
+  'Fees',
+  'Source',
+  'Source Link',
+  'Notes',
+];
+
+function hotelRow(params, r, timestamp) {
+  return {
+    'Processed Timestamp': timestamp,
+    Trip: params.trip || '—',
+    Search: params.destination,
+    Site: r.site,
+    Hotel: r.property || '—',
+    Distance: r.distance || '—',
+    Rating: r.rating || '—',
+    'Check-in': params.depart,
+    'Check-in Time': '3:00 PM',
+    'Check-out': params.return,
+    'Check-out Time': '11:00 AM',
+    'Per Night': r.perNight || '—',
+    Total: r.total || '—',
+    Fees: r.fees || '—',
+    Source: r.source || '—',
+    'Source Link': r.sourceLink || '—',
+    Notes: r.notes || '',
+  };
+}
+
+function buildHotelsTable(params, results, timestamp) {
+  const lines = [];
+  lines.push('| ' + HOTEL_COLUMNS.join(' | ') + ' |');
+  lines.push('|' + HOTEL_COLUMNS.map(() => '---').join('|') + '|');
+  for (const r of results) {
+    if (r.error) {
+      const flatErr = String(r.error).replace(/\s+/g, ' ').replace(/\|/g, '\\|').trim();
+      const errCells = HOTEL_COLUMNS.map(c => {
+        if (c === 'Processed Timestamp') return timestamp;
+        if (c === 'Trip') return params.trip || '—';
+        if (c === 'Search') return params.destination;
+        if (c === 'Site') return r.site || '—';
+        if (c === 'Hotel') return `_${flatErr}_`;
+        if (c === 'Check-in') return params.depart;
+        if (c === 'Check-out') return params.return;
+        return '—';
+      });
+      lines.push('| ' + errCells.join(' | ') + ' |');
       continue;
     }
-    sections.push('| Property | Type | Rating | Per Night | Total Stay | Notes |');
-    sections.push('|---|---|---|---|---|---|');
-    for (const r of rows) {
-      if (r.error) {
-        sections.push(`| _${r.error}_ | — | — | — | — | — |`);
-      } else {
-        sections.push(`| ${r.property} | ${r.type} | ${r.rating} | ${r.perNight} | ${r.total} | ${r.notes || ''} |`);
-      }
-    }
-    sections.push('');
+    const row = hotelRow(params, r, timestamp);
+    lines.push('| ' + HOTEL_COLUMNS.map(c => row[c] ?? '—').join(' | ') + ' |');
   }
-  return sections.join('\n').trimEnd();
+  return lines.join('\n');
+}
+
+function buildHotelsCsv(params, results, timestamp) {
+  const lines = [HOTEL_COLUMNS.map(csvEscape).join(',')];
+  for (const r of results) {
+    if (r.error) continue;
+    const row = hotelRow(params, r, timestamp);
+    lines.push(HOTEL_COLUMNS.map(c => csvEscape(row[c])).join(','));
+  }
+  return lines.join('\n') + '\n';
 }
 
 /**
@@ -253,7 +305,8 @@ export function writeResults({ params, results, date }) {
     tableContent = buildFlightsTable(params, results, timestamp);
     csvContent = buildFlightsCsv(params, results, timestamp);
   } else if (params.category === 'hotels') {
-    tableContent = buildHotelsTable(results);
+    tableContent = buildHotelsTable(params, results, timestamp);
+    csvContent = buildHotelsCsv(params, results, timestamp);
   } else {
     tableContent = buildPackagesTable(results);
   }
