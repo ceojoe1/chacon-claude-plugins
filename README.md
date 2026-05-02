@@ -1,82 +1,90 @@
 # chacon-claude-plugins
 
-A personal Claude Code plugin marketplace for browser-automated travel search.
+A Claude Code plugin marketplace with travel-search tools.
+
+The current plugin is **`chacon-travel`** — search real travel sites for flights, hotels, and vacation packages, store results in a local SQLite database, and ask Claude follow-up questions like "what's the cheapest week to fly to SF?"
 
 ## Install
 
-Add the marketplace to Claude Code once, then install any plugin from it:
+Add the marketplace once, install the plugin, then run setup:
 
 ```shell
 /plugin marketplace add ceojoe1/chacon-claude-plugins
 /plugin install chacon-travel@chacon-marketplace
+/chacon-travel:travel-setup
 ```
 
-After installing, the following skills are available:
+`travel-setup` installs Playwright dependencies and registers the travel database — both inside the plugin install directory. **Nothing is copied into your project.**
 
-| Command | Description |
+After setup, restart Claude Code to activate the database query tools.
+
+## What you get
+
+| Command | What it does |
 |---|---|
-| `/chacon-travel:flights` | Search Google Flights, Southwest, Expedia, and Kayak for round-trip fares |
-| `/chacon-travel:hotels` | Search Google Hotels, Expedia, Kayak, Costco Travel, VRBO, and Airbnb for hotels and vacation rentals |
-| `/chacon-travel:vacation-packages` | Search Southwest Vacations, Costco Travel, Expedia, and Kayak for bundled flight + hotel packages |
-| `/chacon-travel:search-all` | Run all three searches in parallel as sub-agents and aggregate into a unified trip cost summary |
+| `/chacon-travel:flights` | Search Google Flights, Kayak, Expedia for round-trip fares |
+| `/chacon-travel:hotels` | Search Google Hotels for hotels and vacation rentals |
+| `/chacon-travel:vacation-packages` | Search Southwest Vacations, Costco Travel, Expedia, Kayak for bundled deals |
+| `/chacon-travel:search-all` | Run all three in parallel and aggregate into a unified summary |
+| `/chacon-travel:trip-save` | Bookmark a trip definition (destination, dates, travelers) for re-runs |
+| `/chacon-travel:trip-list` | List all saved trips with last-search dates |
+| `/chacon-travel:trip-rerun` | Re-run all searches for a saved trip in one go |
+| `/chacon-travel:travel-import` | Backfill the database from legacy `results.csv` files |
 
-### Playwright runtime (required)
+Plus query tools registered as MCP server `chacon-travel-db`:
 
-The skills run headless browser searches via Playwright. After installing the plugin, run `/chacon-travel:travel-setup` once — it installs Playwright dependencies inside the plugin directory and registers the travel DB MCP server. The runtime stays inside the plugin install location; nothing is copied into your project.
+- `get_trips` — list everything you've searched
+- `get_best_fares` — cheapest option per category for a destination
+- `get_price_history` — every snapshot for a destination over time
+- `compare_destinations` — best fare across destinations for one category
+- `get_site_reliability` — which sites tend to block / return errors
 
-### Chrome MCP fallback (recommended)
+You can ask Claude things like *"compare the cheapest hotel I've found in San Francisco vs Oakland"* and it will use these tools.
 
-Install the [Claude-in-Chrome](https://chromewebstore.google.com/detail/claude-in-chrome) extension to fill in results that Playwright can't reach (CAPTCHA-blocked sites).
+## How it works
 
----
+1. You invoke a skill (`/chacon-travel:hotels`).
+2. The skill prompts for any missing inputs, or pulls them from a saved trip if you have one.
+3. Headless Playwright searches the configured sites in parallel.
+4. Results are written to a SQLite database at `<plugin-root>/data/vacai.db`.
+5. The skill summarizes the results — and surfaces price drift if you've searched the same trip before.
 
-## Plugins
+Re-running the same search on the same day **updates** existing rows. Re-running on a different day **adds a new snapshot**, so you can see how prices move over time.
 
-### `chacon-travel`
-
-Searches flights, hotels, and vacation packages across major travel sites using headless Playwright with Chrome MCP fallback.
-
-**Sites covered:** Google Flights · Google Hotels · Southwest Airlines · Expedia · Kayak · Costco Travel · VRBO · Airbnb · Southwest Vacations
-
-**How it works:**
-
-1. **Playwright (headless)** — Runs all configured sites in parallel via `Promise.allSettled`. Results saved to `travel_plans/[destination]/[category]/processed=[date]/results.md`.
-2. **Chrome MCP fallback** — CAPTCHA-blocked sites get filled via the Claude-in-Chrome extension, sequentially to avoid browser collisions.
-3. **`/chacon-travel:search-all`** — Spawns all three skills as parallel background sub-agents for the Playwright phase, then sequentially handles Chrome MCP gap-filling before presenting a unified cost summary.
-
----
-
-## Structure
-
-```
-.claude-plugin/
-  marketplace.json              # marketplace registry (chacon-marketplace)
-
-plugins/
-  chacon-travel/
-    .claude-plugin/
-      plugin.json               # plugin manifest
-    skills/                     # skill definitions (auto-discovered by Claude Code)
-      flights/SKILL.md + sites/
-      hotels/SKILL.md + sites/
-      vacation-packages/SKILL.md + sites/
-      search-all/SKILL.md
-    playwright/                 # headless site scripts
-      flights/   hotels/   vacation-packages/
-
-playwright/                     # shared Playwright runtime (install separately)
-  lib/                          # args, browser, writer, summary
-  sites/helpers.js              # shared utilities
-  search.js                     # CLI entry point
-
-.claude/
-  skills/                       # standalone installs (short names, this project only)
-```
-
----
+By default no flat files are written. Pass `--export` to also generate `.md`/`.csv` alongside the database.
 
 ## Requirements
 
 - [Claude Code](https://claude.ai/code)
-- Node.js 18+
-- [Claude-in-Chrome](https://chromewebstore.google.com/detail/claude-in-chrome) extension (for CAPTCHA fallback)
+- Node.js 22.5 or newer (for the built-in `node:sqlite` API)
+- An internet connection
+
+## Where data lives
+
+| What | Where |
+|---|---|
+| Database | `<plugin-root>/data/vacai.db` |
+| Optional .md/.csv exports | `<plugin-root>/data/<destination-slug>/<category>/` |
+| Override location | set `CHACON_TRAVEL_DATA_DIR` env var |
+
+The plugin install root resolves automatically. If the plugin directory isn't writable on your system, data falls back to `~/.claude/chacon-travel/data/`.
+
+## Repository structure
+
+```
+.claude-plugin/marketplace.json   # marketplace registry
+plugins/chacon-travel/
+  .claude-plugin/plugin.json      # plugin manifest
+  skills/                         # all /chacon-travel:* commands
+  playwright/                     # headless search runtime
+    search.js  trip.js  import.js # CLI entry points
+    flights/   hotels/   vacation-packages/   # per-site scrapers
+    lib/                          # args, browser, db, writer, geocoding
+  mcp/
+    travel-db.js  schema.sql      # query MCP server + DB schema
+  data/                           # vacai.db (created on first run)
+```
+
+## Contributing
+
+Issues and pull requests welcome. See `debugging/` for per-site scraper notes — useful if you want to add or fix a travel site.
