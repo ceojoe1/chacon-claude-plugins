@@ -1,127 +1,57 @@
 ---
 name: hotels
-description: Search travel sites for hotels and vacation rentals and return a cost comparison table. Use when the user wants to find hotels, vacation rentals, or compare lodging options for a trip.
+description: Search travel sites for hotels and vacation rentals and return a cost comparison summary. Use when the user wants to find hotels, vacation rentals, or compare lodging options for a trip.
 ---
 
-Search travel sites for hotels and vacation rentals, return a cost comparison table, then save results.
+Search travel sites for hotels and present a cost comparison.
 
-When this skill is invoked:
+## Step 1 — Resolve trip parameters
 
-## Step 1 — Collect Inputs
+Call `mcp__chacon-travel-db__get_trips` to list saved trips.
 
-First, call the `mcp__chacon-travel-db__get_trips` tool to retrieve stored trips from the database.
+- If trips are returned, use AskUserQuestion to ask which trip to search (one option per trip, label format: `<name> — <destination>, <check-in> to <check-out>`) plus a "New trip" option.
+- If the user picks a saved trip, pull destination/check-in/check-out/travelers/rooms from its row — skip those questions.
+- If "New trip" or no saved trips, prompt for missing fields via AskUserQuestion:
+  - **Destination** (city, neighborhood, or address)
+  - **Check-in date** (YYYY-MM-DD)
+  - **Check-out date** (YYYY-MM-DD)
+  - **Number of guests** (default 1)
+  - **Number of rooms** (default 1)
+  - **Trip label** — optional, only ask if the user wants to bookmark this for re-runs
 
-- If **trips are returned**, use AskUserQuestion to ask the user:
-  - "Which trip would you like to search hotels for?" with one option per trip (label format: `[destination] — [check-in] to [check-out], [N] travelers`) plus a "New trip" option
-  - If they pick an existing trip, pre-fill destination, check-in, check-out, and traveler count from that trip record — skip asking for those fields
-  - If they pick "New trip", prompt for all details as normal
+## Step 2 — Run the search
 
-Then collect any remaining missing details via AskUserQuestion:
-- Destination / neighborhood / property name — skip if pre-filled from a stored trip
-- Check-in date (YYYY-MM-DD) — skip if pre-filled
-- Check-out date (YYYY-MM-DD) — skip if pre-filled
-- Number of guests — skip if pre-filled
-- Number of rooms (default 1 if not specified)
-
-**Experiences** — ask the user which experiences they plan to attend, using multiSelect: true. Offer 3–4 destination-appropriate options based on the destination (e.g., for Orlando: Theme Parks, Disney World, Universal Studios, International Drive, Beaches). Always include an "Other / No preference" option. The user may select multiple.
-
-Use the selected experiences to:
-- Prioritize hotels that are close to or affiliated with the chosen experiences (e.g., Disney-area resorts for Disney World, beachfront for beaches)
-- Note distance or relevance to each experience in the results
-- Filter out properties that are far from all selected experiences when better options exist
-
-## Step 2 — Search for Hotels and Rentals
-
-### Step 2a — Run Playwright headless search
-
-Use the Bash tool to run:
+Use the Bash tool. The script writes results directly to the SQLite DB; nothing in the project working directory is touched.
 
 ```
-node --no-warnings "${CLAUDE_PLUGIN_ROOT}/playwright/search.js" hotels --destination "<DESTINATION>" --depart <YYYY-MM-DD> --return <YYYY-MM-DD> --travelers <N> --rooms <N>
+node --no-warnings "${CLAUDE_PLUGIN_ROOT}/playwright/search.js" hotels \
+  --destination "<DESTINATION>" \
+  --depart <YYYY-MM-DD> --return <YYYY-MM-DD> \
+  --travelers <N> --rooms <N> \
+  [--trip "<TRIP LABEL>"]
 ```
 
-This writes results to `travel_plans/[destination-slug]/hotels/processed=[YYYY-MM-DD]/results.md` and updates `summary.md` automatically. Wait for the command to complete.
+Wait for the command to finish. The output prints which sites succeeded and how many rows landed.
 
-### Step 2b — Read results and identify gaps
+## Step 3 — Summarize the results
 
-Read the written `results.md` file. Identify any rows marked `N/A` or sites that returned an error.
+Query the DB for the freshly written snapshot:
 
-### Step 2c — Fill gaps with Chrome MCP
+- Call `mcp__chacon-travel-db__get_best_fares` with the destination slug (printed by the search command, e.g. `san-francisco-ca`) to get the lowest-priced option.
+- Call `mcp__chacon-travel-db__get_price_history` with `category="hotels"` and the slug to get all rows from this snapshot.
 
-> **Silent mode:** Execute all Chrome MCP browser steps without narrating individual actions (clicks, scrolls, typing). Use the tools quietly and only report the final prices found or a single error message if a site is blocked.
+Render a concise summary table (top 5-8 options sorted by total ascending):
 
-For each site with an N/A result, use `mcp__claude-in-chrome__*` tools to search that site in Chrome and retrieve results. Refer to the per-site navigation guides in `sites/` for UI steps:
+| Hotel | Distance | Rating | Per Night | Total | Fees | Source |
+|---|---|---|---|---|---|---|
+| Warfield Hotel | 0.5 mi | ⭐3.1 | $74 | $295 | $44 | Agoda |
 
-1. **Google Hotels** — https://www.google.com/travel/hotels → `sites/google-hotels.md`
-2. **Expedia** — https://www.expedia.com/Hotels → `sites/expedia.md`
-3. **Kayak** — https://www.kayak.com/hotels → `sites/kayak.md`
-4. **Costco Travel** — https://www.costcotravel.com/Hotels → `sites/costco-travel.md`
-5. **VRBO** — https://www.vrbo.com → `sites/vrbo.md`
-6. **Airbnb** — https://www.airbnb.com → `sites/airbnb.md`
+If multiple snapshots exist for this trip+category in the price history, surface the price-drift highlight:
+> "Cheapest hotel dropped from $312 → $295 since last search on 2026-04-28."
 
-For each selected option, note:
-- Property name
-- Type (Hotel / Condo / Vacation Rental)
-- Star rating or guest rating
-- Price per night
-- Total cost for the full stay
-- Proximity or relevance to selected experiences (e.g., "On-site Disney access", "0.5 mi from Universal", "Beachfront")
-- Direct link to the listing (if visible)
+## Step 4 — Offer follow-ups
 
-### Step 2d — Update results file with MCP data
+After the table, offer one or both of these (only if applicable):
 
-If any MCP searches succeeded, edit `results.md` to replace the N/A rows with the new data.
-
-For each site, find the top **1–4** highest-quality or most preferred options. Prioritize by:
-1. **Experience alignment** — properties close to or purpose-built for the selected experiences rank first
-2. **Amenities** — must have pool; prefer properties that also offer a gym, on-site family dining or a quality restaurant, and resort-style perks (spa, concierge, kids' club, free breakfast). Flag these in results.
-3. **Guest rating** (target 8.5+/10 on Expedia/Kayak, 4.3+/5 on Google — mid-tier minimum)
-4. **Star class** (4-star and above preferred; 3-star only if ratings and amenities are exceptional)
-5. **Value** (best quality-to-price ratio within mid/upper tier)
-
-**Skip** properties that: are below 4-star or 8.0/10, lack a pool, or are clearly budget/economy class (e.g. motels, hostels, extended-stay). If a site returns only budget options, note it rather than surfacing low-quality results.
-
-If a site still cannot be searched after MCP attempt, leave it as "N/A" and continue.
-
-## Step 3 — Output Results Table
-
-Present the results as a markdown table (up to **8 best options** across all sites, prioritized by experience alignment):
-
-| Site | Property | Type | Rating | Per Night | Total Stay | Experience Fit | Link |
-|---|---|---|---|---|---|---|---|
-| Google Hotels | ... | Hotel | ⭐4.5 | $X | $X | Disney area, 0.2 mi to park | [Book](#) |
-| Costco Travel | ... | Hotel | ⭐4.2 | $X | $X | I-Drive, near Universal | [Book](#) |
-| VRBO | ... | Vacation Rental | ⭐4.8 | $X | $X | Disney Springs area | [Book](#) |
-| Airbnb | ... | Condo | ⭐4.7 | $X | $X | Near Universal | [Book](#) |
-
-## Step 4 — Save Results
-
-Derive a folder-safe destination name from the destination input: lowercase, spaces replaced with hyphens (e.g. "San Diego, CA" → `san-diego-ca`).
-
-### 4a — Write search results
-
-Write results to `travel_plans/[destination-slug]/hotels/processed=[YYYY-MM-DD]/results.md` (create directories if needed):
-
-```
-## Hotels — Searched: [current date and time]
-
-### Inputs
-| Field | Value |
-|---|---|
-| Destination | [destination] |
-| Check-in | [check-in date] |
-| Check-out | [check-out date] |
-| Guests | [number] |
-| Rooms | [number] |
-| Experiences | [comma-separated list of selected experiences] |
-
-### Results
-[paste the full results table here]
-```
-
-### 4b — Update summary.md
-
-Update `travel_plans/[destination-slug]/summary.md` (create if it doesn't exist):
-- Set the **Latest Prices** row for Hotels to the best rate found today
-- Append a new row to the **Price History > Hotels** table with today's date, best rate, and the change vs. the previous search
-- Add an entry to the Search History list pointing to the new processed directory
+- If this was a new trip and the user gave a label, mention it's been saved and they can re-run with `/trip-rerun "<label>"`.
+- If `--export` wasn't used, mention the user can re-run with `--export` to get .md/.csv files alongside the DB.

@@ -1,116 +1,87 @@
 ---
 name: search-all
-description: Run flights, hotels, and vacation-packages searches simultaneously as parallel sub-agents and aggregate into a unified trip cost summary. Use when the user wants a full trip cost picture in one go.
+description: Run flights, hotels, and vacation-packages searches in parallel for a single trip and aggregate into a unified cost summary. Use when the user wants a full trip cost picture in one go.
 ---
 
-Search all travel categories (flights, hotels, vacation packages) in parallel using sub-agents, then aggregate results into a unified trip summary.
+Search all three travel categories (flights, hotels, vacation packages) in parallel, then aggregate into one summary.
 
-When this skill is invoked:
+## Step 1 — Resolve trip parameters
 
-## Step 1 — Collect Inputs
+Call `mcp__chacon-travel-db__get_trips` to list saved trips.
 
-First, check whether `travel_plans/` exists and contains any destination folders.
+- If trips are returned, use AskUserQuestion to ask which trip to search plus a "New trip" option.
+- If the user picks a saved trip, pull origin/destination/depart/return/travelers/rooms from its row.
+- If "New trip" or no saved trips, prompt via a single AskUserQuestion call for:
+  - **Origin** (city or airport code) — required for flights/packages
+  - **Destination** (city, region, or address)
+  - **Departure date** (YYYY-MM-DD)
+  - **Return date** (YYYY-MM-DD)
+  - **Number of travelers** (default 1)
+  - **Number of rooms** (for hotels, default 1)
+  - **Trip label** — optional, only ask if the user wants to bookmark this for re-runs
 
-- If **existing destination folders are found**, use AskUserQuestion to ask the user:
-  - "Which destination would you like to search?" with one option per existing folder (using the folder name as the label) plus a "New destination" option
-  - If they pick an existing destination, pre-fill the destination and skip asking for it again
-  - If they pick "New destination", prompt for the destination as normal
+## Step 2 — Run all three searches in parallel
 
-Then collect all remaining details via a **single** AskUserQuestion call:
-- Origin city (departure airport or city)
-- Destination city — skip if pre-filled
-- Departure date (YYYY-MM-DD)
-- Return date (YYYY-MM-DD)
-- Number of travelers (exact whole number, e.g. 2, 3, 4)
-- Number of rooms (for hotels, default 1)
+Spawn three sub-agents in a single message via the Agent tool with `run_in_background: true`. Each sub-agent runs one Playwright category. The DB writer handles dedupe so concurrent writes against the same trip are safe.
 
-**Experiences** — ask which experiences they plan to attend using multiSelect: true. Offer destination-appropriate options (e.g. for Orlando: Theme Parks, Disney World, Universal Studios, International Drive, Beaches). Always include "Other / No preference".
-
-## Step 2 — Parallel Playwright Searches (headless only)
-
-Spawn all three Playwright searches **simultaneously** using the Agent tool with `run_in_background: true`. These run headless with no Chrome MCP — pure Playwright only.
-
-### Sub-agent: Flights (Playwright only)
+### Sub-agent: Flights
 ```
-Run ONLY the Playwright headless step for the /flights skill. Do NOT use Chrome MCP. Do not ask questions.
-
+Run the headless Playwright search for flights only. Do not ask questions.
 Run:
-  node --no-warnings "${CLAUDE_PLUGIN_ROOT}/playwright/search.js" flights --origin "[origin]" --destination "[destination]" --depart [depart] --return [return] --travelers [travelers]
-
-Wait for it to complete, then report back: which sites succeeded, which returned N/A, and the path to results.md.
+  node --no-warnings "${CLAUDE_PLUGIN_ROOT}/playwright/search.js" flights --origin "[origin]" --destination "[destination]" --depart [depart] --return [return] --travelers [travelers] [--trip "[trip label]"]
+Wait for it to complete and report which sites succeeded vs. errored.
 ```
 
-### Sub-agent: Hotels (Playwright only)
+### Sub-agent: Hotels
 ```
-Run ONLY the Playwright headless step for the /hotels skill. Do NOT use Chrome MCP. Do not ask questions.
-
+Run the headless Playwright search for hotels only. Do not ask questions.
 Run:
-  node --no-warnings "${CLAUDE_PLUGIN_ROOT}/playwright/search.js" hotels --destination "[destination]" --depart [depart] --return [return] --travelers [travelers] --rooms [rooms]
-
-Wait for it to complete, then report back: which sites succeeded, which returned N/A, and the path to results.md.
+  node --no-warnings "${CLAUDE_PLUGIN_ROOT}/playwright/search.js" hotels --destination "[destination]" --depart [depart] --return [return] --travelers [travelers] --rooms [rooms] [--trip "[trip label]"]
+Wait for it to complete and report which sites succeeded vs. errored.
 ```
 
-### Sub-agent: Vacation Packages (Playwright only)
+### Sub-agent: Vacation Packages
 ```
-Run ONLY the Playwright headless step for the /vacation-packages skill. Do NOT use Chrome MCP. Do not ask questions.
-
+Run the headless Playwright search for vacation packages only. Do not ask questions.
 Run:
-  node --no-warnings "${CLAUDE_PLUGIN_ROOT}/playwright/search.js" vacation-packages --origin "[origin]" --destination "[destination]" --depart [depart] --return [return] --travelers [travelers]
-
-Wait for it to complete, then report back: which sites succeeded, which returned N/A, and the path to results.md.
+  node --no-warnings "${CLAUDE_PLUGIN_ROOT}/playwright/search.js" vacation-packages --origin "[origin]" --destination "[destination]" --depart [depart] --return [return] --travelers [travelers] [--trip "[trip label]"]
+Wait for it to complete and report which sites succeeded vs. errored.
 ```
 
-Inform the user:
-> "Running Playwright searches for flights, hotels, and vacation packages in parallel..."
+Tell the user once: "Running flights + hotels + vacation packages in parallel — this typically takes 5-10 minutes."
 
 Wait for all three to complete before proceeding.
 
-## Step 3 — Sequential Chrome MCP Gap-filling
+## Step 3 — Aggregate and present
 
-**Chrome MCP must run sequentially** — only one skill uses the browser at a time to avoid collisions.
+Query the DB for the freshly written snapshots:
 
-After all three Playwright agents complete, read each results.md and collect the N/A rows across all three categories.
+- Call `mcp__chacon-travel-db__get_best_fares` with the destination slug — returns the cheapest option per category.
+- Call `mcp__chacon-travel-db__get_price_history` for any category where you want to surface a price drift vs. the previous snapshot.
 
-Then fill gaps **one at a time** in this order:
-
-1. **Flights N/A sites** — use Chrome MCP per `.claude/skills/flights/sites/` guides
-2. **Hotels N/A sites** — use Chrome MCP per `.claude/skills/hotels/sites/` guides  
-3. **Vacation Packages N/A sites** — use Chrome MCP per `.claude/skills/vacation-packages/sites/` guides
-
-After filling each category's gaps, update that category's results.md and summary.md before moving to the next.
-
-If a site is CAPTCHA/bot-blocked after one attempt, mark it N/A and move on — do not retry.
-
-## Step 4 — Aggregate and Present Results
-
-Once all gap-filling is complete, present a unified summary:
+Render a unified summary:
 
 ```
 # Trip Cost Summary — [Destination]
 [Origin] → [Destination] | [Depart]–[Return] | [N] Travelers
 
 ## Best Options by Category
-
-| Category | Best Option | Per Person | Total ([N]) | Site |
+| Category | Best Option | Per Person | Total | Source |
 |---|---|---|---|---|
-| ✈️ Flights | [best airline + route] | $X | $X | [site] |
-| 🏨 Hotels | [best property] | $X/night | $X total | [site] |
-| 📦 Package | [best package] | $X | $X | [site] |
+| ✈️ Flights | [airline] | $X | $X | [site] |
+| 🏨 Hotels | [property] | $X/night | $X total | [site] |
+| 📦 Package | [package name] | $X | $X | [site] |
 
 ## Combined Estimates
-
 | Scenario | Flights | Hotels | Total |
 |---|---|---|---|
-| Budget (cheapest each) | $X | $X | **$X** |
-| Mid-range | $X | $X | **$X** |
+| À la carte (flight + hotel separately) | $X | $X | **$X** |
 | Package deal | — | — | **$X** |
 ```
 
-Note any sites that returned N/A (CAPTCHA-blocked) so the user knows where to check manually.
+If a site returned an error in any category, note it briefly. Surface any meaningful price drifts vs. the previous snapshot for this trip.
 
-## Step 5 — Update summary.md
+## Step 4 — Offer follow-ups
 
-Verify `travel_plans/[slug]/summary.md` reflects all three categories with today's date. Add a combined search history entry:
-```
-- `search-all/[YYYY-MM-DD]` — Full parallel search (flights + hotels + packages)
-```
+- If this was a new trip and the user gave a label, mention it's been saved and they can re-run with `/trip-rerun "<label>"`.
+- If `--export` wasn't used, mention they can re-run with `--export` to get .md/.csv files alongside the DB.
