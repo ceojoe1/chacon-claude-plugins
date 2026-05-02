@@ -58,7 +58,8 @@ function queryPriceHistory(slug, category) {
 
   if (category === 'hotels') {
     const rows = db.prepare(`
-      SELECT s.searched_at, h.site, h.property, h.type, h.rating, h.per_night, h.total, h.notes, h.error
+      SELECT s.searched_at, h.site, h.property, h.type, h.rating, h.distance,
+             h.per_night, h.total, h.fees, h.source, h.source_link, h.notes, h.error
       FROM searches s
       JOIN trips t ON t.id = s.trip_id
       JOIN hotel_results h ON h.search_id = s.id
@@ -67,7 +68,7 @@ function queryPriceHistory(slug, category) {
     `).all(slug);
     if (!rows.length) return `No hotel history found for "${slug}".`;
     return `Hotel price history for ${slug}:\n` + rows.map(r =>
-      `${r.searched_at.slice(0, 10)} | ${r.site} | ${r.property || '—'} | ${r.type || '—'} | ${r.rating || '—'} | ${r.per_night || '—'}/night | ${r.total || '—'}${r.notes ? ` | ${r.notes}` : ''}${r.error ? ` | ⚠ ${r.error}` : ''}`
+      `${r.searched_at.slice(0, 10)} | ${r.site} | ${r.property || '—'} | ${r.distance || '—'} | ${r.rating || '—'} | ${r.per_night || '—'}/night | ${r.total || '—'} (fees ${r.fees || '—'}) via ${r.source || '—'}${r.error ? ` | ⚠ ${r.error}` : ''}`
     ).join('\n');
   }
 
@@ -341,7 +342,7 @@ function main() {
         result: {
           protocolVersion: '2024-11-05',
           capabilities: { tools: {} },
-          serverInfo: { name: 'chacon-travel-db', version: '1.0.0' },
+          serverInfo: { name: 'chacon-travel-db', version: '2.0.0' },
         },
       });
 
