@@ -24,7 +24,9 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@1e60f620b9541d16bece96c5465dc8ee9832be0b # v4.0.3
         with:
-          node-version: '22.5'
+          # node:sqlite was unflagged in Node 24. Earlier 22.x needs
+          # --experimental-sqlite which we'd rather not pepper everywhere.
+          node-version: '24'
           cache: npm
           cache-dependency-path: plugins/chacon-travel/playwright/package-lock.json
 

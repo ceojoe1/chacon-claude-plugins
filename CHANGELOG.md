@@ -8,7 +8,7 @@ All notable changes to chacon-claude-plugins are documented here. The format fol
 - Plugin now runs in place from `${CLAUDE_PLUGIN_ROOT}` — `/travel-setup` no longer copies `playwright/` or `mcp/` into the user's working directory.
 - Default output location moved from `<cwd>/travel_plans/` to `<plugin-root>/data/`.
 - Search results persist to a SQLite database (`vacai.db`) instead of `.md`/`.csv` flat files. Pass `--export` to also generate the legacy flat-file outputs.
-- Minimum Node.js version bumped to **22.5+** (for the built-in `node:sqlite` API).
+- Minimum Node.js version bumped to **24+** (for the built-in unflagged `node:sqlite` API).
 
 ### Added
 - `mcp/schema.sql` — canonical SQLite schema with dedupe constraints. Same trip + category + day = single search row; cross-day appends a snapshot for price-drift queries.

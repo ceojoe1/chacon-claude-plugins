@@ -56,7 +56,7 @@ By default no flat files are written. Pass `--export` to also generate `.md`/`.c
 ## Requirements
 
 - [Claude Code](https://claude.ai/code)
-- Node.js 22.5 or newer (for the built-in `node:sqlite` API)
+- Node.js 24 or newer (for the built-in `node:sqlite` API — earlier 22.x requires the `--experimental-sqlite` flag)
 - An internet connection
 
 ## Where data lives
