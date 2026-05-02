@@ -19,6 +19,7 @@ Options:
                  e.g. --sites "Google Flights,Expedia"
   --trip         Trip label (e.g. "databricks ai summit") for results table
   --max-hotels   Max hotels to drill into (hotels only, default: 8)
+  --export       Also write .md/.csv files alongside SQLite (default: false)
   --headed       Launch visible browser (default: headless)
   --timeout      Per-site timeout ms (default: 120000)
   --pause        Keep browser open N seconds after search (default: 0, implies --headed)
@@ -49,7 +50,7 @@ export function toSlug(value) {
 export function parseArgs(argv) {
   const raw = minimist(argv.slice(2), {
     string: ['origin', 'destination', 'depart', 'return', 'slug', 'sites', 'trip'],
-    boolean: ['headed', 'parallel'],
+    boolean: ['headed', 'parallel', 'export'],
     default: {
       travelers: 1,
       rooms: 1,
@@ -59,6 +60,7 @@ export function parseArgs(argv) {
       sites: '',
       trip: '',
       'max-hotels': 8,
+      export: false,
       parallel: true,
     },
   });
@@ -103,6 +105,7 @@ export function parseArgs(argv) {
     rooms: Number(raw.rooms),
     trip: raw.trip || '',
     maxHotels: Number(raw['max-hotels']),
+    export: !!raw.export,
     slug,
     sitesFilter,
     headed: raw.headed || Number(raw.pause) > 0,

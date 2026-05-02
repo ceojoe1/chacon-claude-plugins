@@ -2,6 +2,11 @@ import fs from 'fs';
 import path from 'path';
 import { bagFeesForTrip } from './bag-fees.js';
 import { DATA_DIR } from './data-dir.js';
+import {
+  upsertTrip, upsertSearchSnapshot,
+  insertFlightResults, insertHotelResults, insertPackageResults,
+  DB_FILE,
+} from './db.js';
 
 const TRAVEL_PLANS_DIR = DATA_DIR;
 
@@ -281,12 +286,38 @@ function categoryLabel(category) {
 }
 
 /**
- * Writes results to travel_plans/[slug]/[category]/processed=[date]/results.md
- * Returns the path written.
+ * Persists results. Always writes to SQLite (vacai.db). Optionally also
+ * emits .md/.csv when params.export is true (--export flag).
+ *
+ * Returns a label describing where results were written.
  */
 export function writeResults({ params, results, date }) {
   const label = categoryLabel(params.category);
   const timestamp = localTimestamp();
+
+  // ── 1. Persist to SQLite ──────────────────────────────────────────────────
+  const tripId = upsertTrip(params);
+  const searchId = upsertSearchSnapshot({
+    tripId,
+    category: params.category,
+    sites: params.sitesFilter && params.sitesFilter.length ? params.sitesFilter.join(',') : null,
+    tripLabel: params.trip || null,
+  });
+
+  // Filter out error-only rows and split into per-site chunks for cleaner inserts.
+  const validRows = results.filter(r => !r.error || r.error);
+  if (params.category === 'flights') {
+    insertFlightResults(searchId, validRows);
+  } else if (params.category === 'hotels') {
+    insertHotelResults(searchId, validRows);
+  } else {
+    insertPackageResults(searchId, validRows);
+  }
+
+  // ── 2. Optional .md/.csv export ───────────────────────────────────────────
+  if (!params.export) {
+    return DB_FILE;
+  }
 
   let tableContent;
   let csvContent = null;
@@ -318,20 +349,17 @@ ${tableContent}
 
   const outPath = path.join(outDir, 'results.md');
 
-  // Append if file exists (multiple runs on the same day), otherwise create
   if (fs.existsSync(outPath)) {
     fs.appendFileSync(outPath, '\n---\n\n' + content, 'utf8');
   } else {
     fs.writeFileSync(outPath, content, 'utf8');
   }
 
-  // Also emit CSV alongside the .md for spreadsheet viewing. Append rows
-  // (without re-emitting the header) when the CSV already exists for the day.
   if (csvContent) {
     const csvPath = path.join(outDir, 'results.csv');
     if (fs.existsSync(csvPath)) {
       const lines = csvContent.split('\n');
-      const dataOnly = lines.slice(1).join('\n'); // drop header on append
+      const dataOnly = lines.slice(1).join('\n');
       if (dataOnly.trim()) {
         fs.appendFileSync(csvPath, dataOnly, 'utf8');
       }

@@ -2,6 +2,7 @@ import { parseArgs } from './lib/args.js';
 import { launchBrowser, newStealthContext } from './lib/browser.js';
 import { writeResults } from './lib/writer.js';
 import { updateSummary } from './lib/summary.js';
+import { closeDb } from './lib/db.js';
 
 const SITE_REGISTRY = {
   flights: [
@@ -178,9 +179,12 @@ async function main() {
   const resultsPath = writeResults({ params, results: allResults, date: today });
   console.log(`  Results: ${resultsPath}`);
 
-  const summaryPath = updateSummary({ params, results: allResults, date: today });
-  console.log(`  Summary: ${summaryPath}`);
+  if (params.export) {
+    const summaryPath = updateSummary({ params, results: allResults, date: today });
+    console.log(`  Summary: ${summaryPath}`);
+  }
 
+  closeDb();
   console.log('\nDone.\n');
 }
 

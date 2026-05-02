@@ -11,14 +11,14 @@ CREATE TABLE IF NOT EXISTS trips (
   name          TEXT,                                          -- user-given label, e.g. "Databricks AI Summit 2026"
   slug          TEXT NOT NULL,                                 -- e.g. "san-francisco-ca"
   destination   TEXT NOT NULL,
-  origin        TEXT,                                          -- NULL for hotels-only trips
+  origin        TEXT NOT NULL DEFAULT '',                     -- '' for hotels-only trips
   depart        TEXT NOT NULL,                                 -- YYYY-MM-DD
   return        TEXT NOT NULL,                                 -- YYYY-MM-DD
   travelers     INTEGER NOT NULL DEFAULT 1,
   rooms         INTEGER NOT NULL DEFAULT 1,
   created_at    TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at    TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (slug, depart, return, travelers, COALESCE(origin, ''))
+  UNIQUE (slug, depart, return, travelers, origin)
 );
 CREATE INDEX IF NOT EXISTS idx_trips_name ON trips(name);
 
