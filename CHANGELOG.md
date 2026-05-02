@@ -6,11 +6,11 @@ All notable changes to chacon-claude-plugins are documented here. The format fol
 
 ### Added
 - `--anchor` CLI flag — landmark/experience used as the geocoding origin for hotel distance calculation. `/hotels` and `/search-all` skills now ask the user to pick a well-known landmark in their destination (e.g. Orlando → Disney/Universal/Islands of Adventure) so distances reflect proximity to what the trip is actually about.
-- MCP `get_price_history` renders Source Link as a short clickable markdown link (`[booking.com](full-url)`) instead of the raw 200-char Google redirect URL.
-
-### Added
-- `--debug` CLI flag — gates verbose scraper logs (per-click traces, calendar nav, price-element counts) behind a flag. Default off so user-facing runs stay clean.
-- `lib/log.js` — tiny logger with `info()` (always prints) and `debug()` (only when `CHACON_DEBUG=1`).
+- `--debug` CLI flag + `lib/log.js` — gates verbose scraper logs (per-click traces, calendar nav, price-element counts) behind a flag. Default off so user-facing runs stay clean.
+- Per-result progress logging in flight scrapers — each parsed flight now logs `Airline: outbound → return (stops) — $price RT` so users running with `run_in_background` see live status instead of a silent buffer.
+- Skill SKILL.md files now instruct background-bash + poll/Read pattern so users see incremental progress during the 5-10 min searches.
+- `flight_results.source_link` column (with idempotent ALTER TABLE migration). Kayak captures the per-card "View Deal" anchor href; Google Flights captures the in-context page URL. MCP renders source as a short clickable markdown link.
+- MCP `get_price_history` for hotels renders Source Link as a short clickable markdown link (`[booking.com](full-url)`) instead of the raw 200-char Google redirect URL.
 
 ### Changed
 - Default per-site timeout bumped 300s → 600s. The 8-hotels × 6-sites parallel run was hitting the previous limit before partial-results could be returned.

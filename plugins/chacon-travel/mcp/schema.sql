@@ -53,6 +53,7 @@ CREATE TABLE IF NOT EXISTS flight_results (
   bag_fees        TEXT,
   total           TEXT,
   amenities       TEXT,
+  source_link     TEXT,
   error           TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_flights_search ON flight_results(search_id);

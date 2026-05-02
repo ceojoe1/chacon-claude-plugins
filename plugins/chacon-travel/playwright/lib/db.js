@@ -22,6 +22,14 @@ function openDb() {
   // Schema is idempotent (CREATE TABLE IF NOT EXISTS) — safe to run on every open.
   const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
   _db.exec(schema);
+  // Migrations for existing DBs created on an older schema. Each ALTER TABLE
+  // is wrapped in try/catch so it no-ops when the column already exists.
+  for (const stmt of [
+    "ALTER TABLE flight_results ADD COLUMN source_link TEXT",
+    "ALTER TABLE package_results ADD COLUMN source_link TEXT",
+  ]) {
+    try { _db.exec(stmt); } catch { /* column exists */ }
+  }
   return _db;
 }
 
@@ -120,8 +128,8 @@ export function insertFlightResults(searchId, rows) {
   const stmt = db.prepare(`
     INSERT INTO flight_results
       (search_id, site, airline, route, stops, outbound, return_times,
-       per_person, base_price, bag_fees, total, amenities, error)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       per_person, base_price, bag_fees, total, amenities, source_link, error)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   for (const r of rows) {
     stmt.run(
@@ -137,6 +145,7 @@ export function insertFlightResults(searchId, rows) {
       r.bagFees || null,
       r.total || null,
       r.includes || r.amenities || null,
+      r.sourceLink || null,
       r.error || null
     );
   }

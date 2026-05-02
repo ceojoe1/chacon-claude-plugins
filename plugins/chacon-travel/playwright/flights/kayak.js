@@ -74,7 +74,7 @@ async function search(context, params) {
     // pairs (outbound + return), an airline name, and a 3+ digit price. We
     // also include Kayak's "Go to result details" string as a card marker
     // (the header tabs and ad cells lack it).
-    const cardTexts = await page.locator(RESULT_LIST).evaluateAll(els => {
+    const cardData = await page.locator(RESULT_LIST).evaluateAll(els => {
       const timePairRe = /\d{1,2}:\d{2}\s*[ap]m\s*[–\-]\s*\d{1,2}:\d{2}\s*[ap]m/gi;
       const airlineRe = /United|Southwest|American|Delta|JetBlue|Alaska|Spirit|Frontier|Hawaiian/i;
       const priceRe = /\$\d{3,}/;
@@ -87,14 +87,23 @@ async function search(context, params) {
         const timeMatches = t.match(timePairRe) || [];
         if (timeMatches.length < 2) continue;
         if (!airlineRe.test(t) || !priceRe.test(t)) continue;
-        passed.push(t);
+        // Extract booking link — typically a "View Deal" / "Go to result details"
+        // anchor on the card. Fall back to the first external-link href.
+        const anchor = el.querySelector('a[href*="/book/"], a[href*="/flights/"], a.Iqt3, a[role="link"]')
+          || el.querySelector('a[href]');
+        const href = anchor ? anchor.href : null;
+        passed.push({ text: t, href });
         if (passed.length >= 5) break;
       }
       return passed;
     }).catch(() => []);
+    const cardTexts = cardData.map(c => c.text);
+    const cardLinks = cardData.map(c => c.href);
 
     const results = [];
-    for (const cardText of cardTexts) {
+    for (let cardIdx = 0; cardIdx < cardTexts.length; cardIdx++) {
+      const cardText = cardTexts[cardIdx];
+      const cardHref = cardLinks[cardIdx];
       // Skip ad / sponsored cards. Kayak marks them with " Ad " (with spaces
       // around the literal text near the price) or "paid placement"/"Book now,
       // pay later" in the body.
@@ -175,7 +184,9 @@ async function search(context, params) {
           perPerson: '$' + tier.price.toLocaleString('en-US') + ' RT',
           bagFees: `$${fees.outbound} / $${fees.return}`,
           total: '$' + totalGroup.toLocaleString('en-US'),
+          sourceLink: cardHref || null,
         });
+        console.log(`  [Kayak]   ${airline}: ${outbound} → ${returnLeg} (${stopsCombined} stops) — $${tier.price} RT`);
       }
 
       if (results.length >= 5) break;

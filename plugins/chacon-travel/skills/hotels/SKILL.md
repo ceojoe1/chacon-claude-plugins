@@ -22,18 +22,30 @@ Call `mcp__chacon-travel-db__get_trips` to list saved trips.
 
 ## Step 2 — Run the search
 
-Use the Bash tool. The script writes results directly to the SQLite DB; nothing in the project working directory is touched.
+Hotel searches typically take 5-10 minutes (multiple sites in parallel + per-hotel detail-page drilldown). To give the user live progress instead of a silent buffer:
 
-```
-node --no-warnings "${CLAUDE_PLUGIN_ROOT}/playwright/search.js" hotels \
-  --destination "<DESTINATION>" \
-  --depart <YYYY-MM-DD> --return <YYYY-MM-DD> \
-  --travelers <N> --rooms <N> \
-  [--anchor "<LANDMARK>"] \
-  [--trip "<TRIP LABEL>"]
-```
+1. **Tell the user upfront:** "Hotel searches across all sites typically take 5-10 minutes. I'll surface progress as each site reports in."
+2. **Run the Bash command with `run_in_background: true`:**
+   ```
+   node --no-warnings "${CLAUDE_PLUGIN_ROOT}/playwright/search.js" hotels \
+     --destination "<DESTINATION>" \
+     --depart <YYYY-MM-DD> --return <YYYY-MM-DD> \
+     --travelers <N> --rooms <N> \
+     [--anchor "<LANDMARK>"] \
+     [--trip "<TRIP LABEL>"]
+   ```
+   This returns a shell ID immediately.
+3. **Poll progress every 30-60 seconds** by reading the shell's output (`Read` on the shell ID). Each poll, surface any NEW lines that look like meaningful status — patterns to watch for:
+   - `Searching <site>...` (a site started)
+   - `[Google Hotels] N qualifying hotel cards — drilling top M` (SERP loaded)
+   - `[Google Hotels] <hotel name>: parsed N price row(s)` (hotel finished)
+   - `✓ <Site>: N result(s)` (site succeeded)
+   - `✗ <Site>: <error>` (site failed)
+   - `Done.` (everything finished)
 
-Wait for the command to finish. The output prints which sites succeeded and how many rows landed.
+   Skip the per-click debug noise (`[KH cal attempt=…]`, `[AB] dest field clicked`, etc. — those are gated behind `--debug` and shouldn't appear).
+
+4. **Exit polling** when output contains `Done.` OR the shell exits.
 
 ## Step 3 — Summarize the results
 

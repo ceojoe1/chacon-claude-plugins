@@ -215,10 +215,11 @@ async function search(context, params) {
         const baseGroup = baseRtPrice * params.travelers;
         const totalGroup = baseGroup + outFees.outbound + retFees.return;
 
+        const airlineLabel = departing.airline === ret.airline
+          ? departing.airline
+          : `${departing.airline} / ${ret.airline}`;
         results.push({
-          airline: departing.airline === ret.airline
-            ? departing.airline
-            : `${departing.airline} / ${ret.airline}`,
+          airline: airlineLabel,
           outbound: departing.timeRange,
           return_: ret.timeRange,
           stopsOut: departing.stops,
@@ -229,7 +230,11 @@ async function search(context, params) {
           perPerson: '$' + baseRtPrice.toLocaleString('en-US') + ' RT',
           bagFees: `$${outFees.outbound} / $${retFees.return}`,
           total: '$' + totalGroup.toLocaleString('en-US'),
+          // GF doesn't expose per-flight permalinks; the in-context page URL
+          // (after returning-flight selection) is the closest thing.
+          sourceLink: page.url(),
         });
+        console.log(`  [Google Flights]   ${airlineLabel}: ${departing.timeRange} → ${ret.timeRange} (${departing.stops}/${ret.stops} stops) — $${baseRtPrice} RT`);
         added++;
       }
 

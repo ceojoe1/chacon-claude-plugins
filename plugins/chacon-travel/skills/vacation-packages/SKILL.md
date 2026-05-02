@@ -21,13 +21,18 @@ Call `mcp__chacon-travel-db__get_trips` to list saved trips.
 
 ## Step 2 — Run the search
 
-```
-node --no-warnings "${CLAUDE_PLUGIN_ROOT}/playwright/search.js" vacation-packages \
-  --origin "<ORIGIN>" --destination "<DESTINATION>" \
-  --depart <YYYY-MM-DD> --return <YYYY-MM-DD> \
-  --travelers <N> \
-  [--trip "<TRIP LABEL>"]
-```
+Vacation-package searches typically take 3-6 minutes. Run in background and stream progress:
+
+1. Tell the user: "Package searches across all sites typically take a few minutes. I'll surface progress as each site reports in."
+2. Run the Bash command with `run_in_background: true`:
+   ```
+   node --no-warnings "${CLAUDE_PLUGIN_ROOT}/playwright/search.js" vacation-packages \
+     --origin "<ORIGIN>" --destination "<DESTINATION>" \
+     --depart <YYYY-MM-DD> --return <YYYY-MM-DD> \
+     --travelers <N> \
+     [--trip "<TRIP LABEL>"]
+   ```
+3. Poll the shell's output every 30-60s via `Read`. Surface meaningful new lines: `Searching <site>...`, `✓ <Site>: N result(s)`, `✗ <Site>: <error>`. Stop when output contains `Done.` or shell exits.
 
 Sites covered: Southwest Vacations, Costco Travel, Expedia, Kayak. Results write directly to SQLite.
 

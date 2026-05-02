@@ -68,7 +68,8 @@ function queryPriceHistory(slug, category) {
 
   if (category === 'flights') {
     const rows = db.prepare(`
-      SELECT s.searched_at, f.site, f.airline, f.route, f.stops, f.per_person, f.total, f.error
+      SELECT s.searched_at, f.site, f.airline, f.route, f.stops, f.outbound, f.return_times,
+             f.per_person, f.total, f.source_link, f.error
       FROM searches s
       JOIN trips t ON t.id = s.trip_id
       JOIN flight_results f ON f.search_id = s.id
@@ -77,7 +78,7 @@ function queryPriceHistory(slug, category) {
     `).all(slug);
     if (!rows.length) return `No flight history found for "${slug}".`;
     return `Flight price history for ${slug}:\n` + rows.map(r =>
-      `${r.searched_at.slice(0, 10)} | ${r.site} | ${r.airline || '—'} | ${r.route || '—'} | ${r.stops || '—'} | ${r.per_person || '—'} | ${r.total || '—'}${r.error ? ` | ⚠ ${r.error}` : ''}`
+      `${r.searched_at.slice(0, 10)} | ${r.site} | ${r.airline || '—'} | ${r.outbound || '—'} → ${r.return_times || '—'} | ${r.stops || '—'} | ${r.per_person || '—'} | ${r.total || '—'} ${shortLink(r.source_link)}${r.error ? ` | ⚠ ${r.error}` : ''}`
     ).join('\n');
   }
 
